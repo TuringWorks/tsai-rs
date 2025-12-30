@@ -11,7 +11,6 @@ members = [
     "crates/tsai",
     "crates/tsai_cli",
     "crates/tsai_compute",
-    "crates/burn_mlx",
 ]
 
 # Python bindings are excluded from default workspace due to polars/pyo3 linking conflict
@@ -51,7 +50,7 @@ burn-autodiff = "0.16"
 burn-ndarray = "0.16"
 burn-wgpu = "0.16"
 burn-tch = "0.16"
-burn-mlx = { path = "crates/burn_mlx" }
+burn-mlx = { git = "https://github.com/TuringWorks/burn-mlx.git" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

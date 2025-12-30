@@ -2,11 +2,15 @@
 name = "burn-mlx"
 version = "0.1.0"
 edition = "2021"
-description = "MLX backend for Burn (Apple Silicon optimized)"
+authors = ["TuringWorks"]
+description = "MLX backend for Burn deep learning framework - native Apple Silicon GPU acceleration"
 license = "Apache-2.0"
-repository = "https://github.com/timeseriesAI/tsai-rs"
-keywords = ["burn", "mlx", "apple-silicon", "machine-learning"]
-categories = ["science::ml"]
+repository = "https://github.com/TuringWorks/tsai-rs"
+homepage = "https://github.com/TuringWorks/tsai-rs/tree/main/crates/burn_mlx"
+documentation = "https://docs.rs/burn-mlx"
+readme = "README.md"
+keywords = ["burn", "mlx", "apple-silicon", "machine-learning", "gpu"]
+categories = ["science::ml", "algorithms"]
 
 [features]
 default = []

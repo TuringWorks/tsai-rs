@@ -1,0 +1,31 @@
+[package]
+name = "tsai_models"
+description = "Model zoo for tsai-rs: CNN, Transformer, ROCKET, RNN, and Tabular architectures"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai_core/backend-ndarray"]
+backend-wgpu = ["tsai_core/backend-wgpu"]
+backend-tch = ["tsai_core/backend-tch"]
+
+[dependencies]
+tsai_core = { workspace = true }
+
+burn = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+thiserror = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+burn-ndarray = { workspace = true }

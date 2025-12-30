@@ -1,0 +1,37 @@
+[package]
+name = "tsai_cli"
+description = "Command-line interface for tsai-rs time series deep learning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tsai"
+path = "src/main.rs"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai/backend-ndarray"]
+backend-wgpu = ["tsai/backend-wgpu"]
+backend-tch = ["tsai/backend-tch"]
+
+[dependencies]
+tsai = { workspace = true }
+tsai_data = { workspace = true }
+tsai_models = { workspace = true }
+tsai_train = { workspace = true }
+tsai_transforms = { workspace = true }
+tsai_core = { workspace = true }
+
+burn = { workspace = true }
+burn-autodiff = { workspace = true }
+burn-ndarray = { workspace = true }
+
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

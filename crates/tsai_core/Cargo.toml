@@ -1,0 +1,34 @@
+[package]
+name = "tsai_core"
+description = "Core tensor types, shapes, and transform traits for tsai-rs time series deep learning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["burn-ndarray"]
+backend-wgpu = ["burn-wgpu"]
+backend-tch = ["burn-tch"]
+
+[dependencies]
+burn = { workspace = true }
+burn-ndarray = { workspace = true, optional = true }
+burn-wgpu = { workspace = true, optional = true }
+burn-tch = { workspace = true, optional = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+ndarray = { workspace = true }
+thiserror = { workspace = true }
+
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

@@ -1,0 +1,44 @@
+[package]
+name = "tsai_train"
+description = "Training loop, callbacks, metrics, and checkpointing for tsai-rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai_core/backend-ndarray", "tsai_data/backend-ndarray", "tsai_models/backend-ndarray"]
+backend-wgpu = ["tsai_core/backend-wgpu", "tsai_data/backend-wgpu", "tsai_models/backend-wgpu", "burn-wgpu"]
+backend-tch = ["tsai_core/backend-tch", "tsai_data/backend-tch", "tsai_models/backend-tch"]
+wandb = ["reqwest"]
+
+[dependencies]
+tsai_core = { workspace = true }
+tsai_data = { workspace = true }
+tsai_models = { workspace = true }
+
+burn = { workspace = true }
+burn-ndarray = { workspace = true }
+burn-wgpu = { workspace = true, optional = true }
+burn-autodiff = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+safetensors = { workspace = true }
+schemars = { workspace = true }
+
+ndarray = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+burn-ndarray = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,123 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tsai_core",
+    "crates/tsai_data",
+    "crates/tsai_transforms",
+    "crates/tsai_models",
+    "crates/tsai_train",
+    "crates/tsai_analysis",
+    "crates/tsai_explain",
+    "crates/tsai",
+    "crates/tsai_cli",
+    "crates/tsai_compute",
+    "crates/burn_mlx",
+]
+
+# Python bindings are excluded from default workspace due to polars/pyo3 linking conflict
+# Build separately with: cd crates/tsai_python && maturin develop
+exclude = [
+    "crates/tsai_python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["tsai-rs contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/timeseriesAI/tsai-rs"
+homepage = "https://github.com/timeseriesAI/tsai-rs"
+documentation = "https://docs.rs/tsai"
+readme = "README.md"
+keywords = ["time-series", "deep-learning", "machine-learning", "neural-network"]
+categories = ["science", "machine-learning"]
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal crates
+tsai_core = { path = "crates/tsai_core" }
+tsai_data = { path = "crates/tsai_data" }
+tsai_transforms = { path = "crates/tsai_transforms" }
+tsai_models = { path = "crates/tsai_models" }
+tsai_train = { path = "crates/tsai_train" }
+tsai_analysis = { path = "crates/tsai_analysis" }
+tsai_explain = { path = "crates/tsai_explain" }
+tsai = { path = "crates/tsai" }
+tsai_compute = { path = "crates/tsai_compute" }
+
+# Burn framework (DL backend)
+burn = "0.16"
+burn-autodiff = "0.16"
+burn-ndarray = "0.16"
+burn-wgpu = "0.16"
+burn-tch = "0.16"
+burn-mlx = { path = "crates/burn_mlx" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+safetensors = "0.4"
+
+# Data formats
+ndarray = { version = "0.16", features = ["serde"] }
+ndarray-npy = "0.9"
+polars = { version = "0.44", features = ["parquet", "csv", "lazy"] }
+arrow = "53"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Random number generation
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Parallelism
+rayon = "1.10"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Testing
+approx = "0.5"
+
+# Benchmarking
+criterion = "0.5"
+
+# Python bindings
+numpy = "0.22"
+
+# Python interop (optional)
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+
+# HTTP client for W&B (optional)
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+
+# HTTP client for downloads (sync)
+ureq = "2.10"
+
+# Zip file handling
+zip = "2.4"
+
+# Plotting
+plotters = "0.3"
+
+# Directories
+dirs = "5.0"
+
+# Schema generation
+schemars = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,38 @@
+[package]
+name = "tsai_data"
+description = "Dataset and dataloader implementations for tsai-rs time series deep learning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai_core/backend-ndarray"]
+backend-wgpu = ["tsai_core/backend-wgpu"]
+backend-tch = ["tsai_core/backend-tch"]
+
+[dependencies]
+tsai_core = { workspace = true }
+
+burn = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ndarray = { workspace = true }
+ndarray-npy = { workspace = true }
+polars = { workspace = true }
+arrow = { workspace = true }
+
+thiserror = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rayon = { workspace = true }
+dirs = { workspace = true }
+ureq = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

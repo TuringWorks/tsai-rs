@@ -1,0 +1,95 @@
+[package]
+name = "tsai_compute"
+version = "0.1.0"
+edition = "2021"
+description = "Heterogeneous compute abstraction layer for tsai-rs"
+license = "Apache-2.0"
+repository = "https://github.com/timeseriesAI/tsai-rs"
+keywords = ["compute", "gpu", "cuda", "metal", "vulkan"]
+categories = ["science", "hardware-support"]
+
+[features]
+default = ["cpu"]
+
+# CPU backends
+cpu = ["rayon", "wide"]
+numa = ["cpu", "hwlocality"]
+
+# GPU backends
+cuda = ["cudarc"]
+metal = []  # Uses target-specific deps below
+vulkan = ["ash", "gpu-allocator"]
+opencl = ["opencl3"]
+rocm = []  # rocm-rs not yet stable, placeholder
+mlx = ["mlx-rs"]  # Apple MLX framework (macOS only)
+
+# Burn integration
+burn-bridge = ["burn"]
+
+# Convenience features
+all-gpu = ["cuda", "metal", "vulkan", "opencl", "rocm"]
+all-gpu-macos = ["metal", "mlx"]  # macOS-specific GPU backends
+full = ["cpu", "numa", "all-gpu", "burn-bridge"]
+
+[dependencies]
+# Core dependencies (always included)
+thiserror = "2.0"
+tracing = "0.1"
+parking_lot = "0.12"
+num_cpus = "1.16"
+sys-info = "0.9"
+
+# CPU parallelism
+rayon = { version = "1.10", optional = true }
+
+# SIMD abstraction (stable Rust, portable)
+wide = { version = "0.7", optional = true }
+
+# NUMA topology (use alpha version)
+hwlocality = { version = "1.0.0-alpha.11", optional = true }
+
+# CUDA (NVIDIA)
+cudarc = { version = "0.12", optional = true, default-features = false, features = ["driver"] }
+
+# Vulkan
+ash = { version = "0.38", optional = true, default-features = false, features = ["linked", "debug"] }
+gpu-allocator = { version = "0.27", optional = true, default-features = false, features = ["vulkan"] }
+
+# OpenCL
+opencl3 = { version = "0.12", optional = true }
+
+# Burn integration
+burn = { version = "0.16", optional = true }
+
+# Metal (macOS/iOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString", "NSRange"] }
+objc2-metal = { version = "0.2", features = [
+    "MTLDevice",
+    "MTLBuffer",
+    "MTLResource",
+    "MTLCommandQueue",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLBlitCommandEncoder",
+    "MTLTypes",
+    "block2",
+    "std",
+] }
+block2 = "0.5"
+
+# MLX (Apple Silicon ML framework - macOS only)
+mlx-rs = { version = "0.25", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+approx = "0.5"
+
+[[bench]]
+name = "simd_ops"
+harness = false
+
+[[bench]]
+name = "device_ops"
+harness = false

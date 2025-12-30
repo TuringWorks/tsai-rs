@@ -1,0 +1,32 @@
+[package]
+name = "tsai_analysis"
+description = "Analysis utilities: confusion matrix, top losses, permutation importance for tsai-rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai_core/backend-ndarray", "tsai_train/backend-ndarray"]
+backend-wgpu = ["tsai_core/backend-wgpu", "tsai_train/backend-wgpu"]
+backend-tch = ["tsai_core/backend-tch", "tsai_train/backend-tch"]
+
+[dependencies]
+tsai_core = { workspace = true }
+tsai_train = { workspace = true }
+
+burn = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ndarray = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true }
+plotters = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

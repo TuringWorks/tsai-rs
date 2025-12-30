@@ -1,0 +1,29 @@
+[package]
+name = "tsai_explain"
+description = "Explainability: activation/gradient capture, attribution maps for tsai-rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = ["tsai_core/backend-ndarray", "tsai_models/backend-ndarray"]
+backend-wgpu = ["tsai_core/backend-wgpu", "tsai_models/backend-wgpu"]
+backend-tch = ["tsai_core/backend-tch", "tsai_models/backend-tch"]
+
+[dependencies]
+tsai_core = { workspace = true }
+tsai_models = { workspace = true }
+
+burn = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ndarray = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

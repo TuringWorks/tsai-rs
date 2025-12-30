@@ -1,0 +1,121 @@
+[package]
+name = "tsai"
+description = "Time series deep learning in Rust - a feature-parity port of Python tsai"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = ["backend-ndarray"]
+backend-ndarray = [
+    "tsai_core/backend-ndarray",
+    "tsai_data/backend-ndarray",
+    "tsai_transforms/backend-ndarray",
+    "tsai_models/backend-ndarray",
+    "tsai_train/backend-ndarray",
+    "tsai_analysis/backend-ndarray",
+    "tsai_explain/backend-ndarray",
+]
+backend-wgpu = [
+    "tsai_core/backend-wgpu",
+    "tsai_data/backend-wgpu",
+    "tsai_transforms/backend-wgpu",
+    "tsai_models/backend-wgpu",
+    "tsai_train/backend-wgpu",
+    "tsai_analysis/backend-wgpu",
+    "tsai_explain/backend-wgpu",
+    "burn-wgpu",
+]
+backend-tch = [
+    "tsai_core/backend-tch",
+    "tsai_data/backend-tch",
+    "tsai_transforms/backend-tch",
+    "tsai_models/backend-tch",
+    "tsai_train/backend-tch",
+    "tsai_analysis/backend-tch",
+    "tsai_explain/backend-tch",
+]
+backend-mlx = ["burn-mlx"]
+wandb = ["tsai_train/wandb"]
+
+[dependencies]
+tsai_core = { workspace = true }
+tsai_data = { workspace = true }
+tsai_transforms = { workspace = true }
+tsai_models = { workspace = true }
+tsai_train = { workspace = true }
+tsai_analysis = { workspace = true }
+tsai_explain = { workspace = true }
+
+burn = { workspace = true }
+burn-wgpu = { workspace = true, optional = true }
+burn-mlx = { workspace = true, optional = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+ndarray = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+burn-autodiff = { workspace = true }
+burn-ndarray = { workspace = true }
+anyhow = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "training_bench"
+harness = false
+
+# Examples are in the workspace root examples/ directory
+[[example]]
+name = "ucr_inception_time"
+path = "../../examples/ucr_inception_time.rs"
+
+[[example]]
+name = "simple_classification"
+path = "../../examples/simple_classification.rs"
+
+[[example]]
+name = "forecasting"
+path = "../../examples/forecasting.rs"
+
+[[example]]
+name = "data_loading"
+path = "../../examples/data_loading.rs"
+
+[[example]]
+name = "train_ucr"
+path = "../../examples/train_ucr.rs"
+
+[[example]]
+name = "benchmark_ucr"
+path = "../../examples/benchmark_ucr.rs"
+
+[[example]]
+name = "compare_models"
+path = "../../examples/compare_models.rs"
+
+[[example]]
+name = "sklearn_api"
+path = "../../examples/sklearn_api.rs"
+
+[[example]]
+name = "train_ucr_metal"
+path = "../../examples/train_ucr_metal.rs"
+required-features = ["backend-wgpu"]
+
+[[example]]
+name = "train_ucr_mlx"
+path = "../../examples/train_ucr_mlx.rs"
+required-features = ["backend-mlx"]
+
+[[example]]
+name = "mlx_tensors"
+path = "../../examples/mlx_tensors.rs"
+required-features = ["backend-mlx"]

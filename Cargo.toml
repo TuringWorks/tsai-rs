@@ -29,7 +29,7 @@ homepage = "https://github.com/timeseriesAI/tsai-rs"
 documentation = "https://docs.rs/tsai"
 readme = "README.md"
 keywords = ["time-series", "deep-learning", "machine-learning", "neural-network"]
-categories = ["science", "machine-learning"]
+categories = ["science"]
 rust-version = "1.75"
 
 [workspace.dependencies]

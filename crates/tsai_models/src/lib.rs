@@ -26,6 +26,9 @@
 //! - [`RNNPlus`] - LSTM/GRU with improvements
 //! - [`RNNAttention`] - RNN with attention
 //!
+//! ## Hybrid Models
+//! - [`RNNFCN`] - RNN-FCN hybrid (LSTM-FCN, GRU-FCN)
+//!
 //! ## Tabular Models
 //! - [`TabTransformer`] - Transformer for tabular data
 //! - [`TabFusionTransformer`] - Fusion of time series and tabular
@@ -36,6 +39,7 @@
 
 pub mod checkpoint;
 pub mod cnn;
+pub mod hybrid;
 pub mod registry;
 pub mod rnn;
 pub mod rocket;
@@ -48,6 +52,7 @@ pub use checkpoint::{
     CheckpointPrecision, ModelCheckpoint,
 };
 pub use cnn::*;
+pub use hybrid::*;
 pub use registry::{default_registry, ModelRegistry, RegistryError, TSModel};
 pub use rnn::*;
 pub use rocket::*;

@@ -14,7 +14,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 24 architectures | **60%** |
+| **Models** | 40+ architectures | 27 architectures | **67%** |
 | **Augmentation Transforms** | 40+ transforms | 26 transforms | **65%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
@@ -26,7 +26,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~77%**
+**Overall Feature Parity: ~79%**
 
 ---
 
@@ -75,9 +75,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Model | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-------|---------------|----------------|--------|-------|
-| RNN_FCN | ✅ | ❌ | **GAP** | RNN + FCN hybrid |
-| LSTM-FCN | ✅ | ❌ | **GAP** | LSTM + FCN |
-| GRU-FCN | ✅ | ❌ | **GAP** | GRU + FCN |
+| RNN_FCN | ✅ | ✅ | **FIT** | LSTM-FCN and GRU-FCN hybrid |
+| LSTM-FCN | ✅ | ✅ | **FIT** | Via RNNFCN with RNNFCNType::LSTM |
+| GRU-FCN | ✅ | ✅ | **FIT** | Via RNNFCN with RNNFCNType::GRU |
 | MLSTM-FCN | ✅ | ❌ | **GAP** | Multi-LSTM + FCN |
 | TransformerRNNPlus | ✅ | ❌ | **GAP** | Transformer + RNN |
 | ConvTranPlus | ✅ | ❌ | **GAP** | Conv + Transformer |
@@ -104,9 +104,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Model Gap Summary
 
-- **Implemented:** 24 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, TabTransformer, LSTM, GRU)
-- **Missing:** 16+ models
-- **Priority Gaps:** RNN_FCN variants, ResCNN, mWDN
+- **Implemented:** 27 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, TabTransformer, LSTM, GRU)
+- **Missing:** 13+ models
+- **Priority Gaps:** MLSTM-FCN, mWDN, TransformerRNNPlus, ConvTranPlus
 
 ---
 
@@ -411,10 +411,10 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 ### High Priority (Core Functionality)
 
 1. **Models to Add:**
-   - RNN_FCN variants
-   - ResCNN
+   - MLSTM-FCN (Multi-LSTM + FCN)
    - mWDN (Multilevel Wavelet Decomposition Network)
-   - RNNPlus with FCN features
+   - TransformerRNNPlus
+   - ConvTranPlus
 
 2. **Transforms to Add:**
    - TSRandomFreqNoise (wavelet-based noise)
@@ -498,9 +498,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ## 12. Conclusion
 
-tsai-rs provides a solid foundation with approximately **77% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
+tsai-rs provides a solid foundation with approximately **79% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
-1. **Model diversity** - 24 of 40+ models implemented (~60%)
+1. **Model diversity** - 27 of 40+ models implemented (~67%)
 2. **Augmentation transforms** - 26 of 40+ transforms implemented (~65%)
 3. **Advanced features** - Missing some specialized callbacks
 
@@ -513,8 +513,8 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add RNN_FCN hybrid models
-2. Implement ResCNN and mWDN
+1. Add MLSTM-FCN and TransformerRNNPlus models
+2. Implement mWDN (Wavelet Decomposition Network)
 3. Add TSRandomFreqNoise and TSFreqDenoise transforms
 4. Implement ShowGraph callback for training visualization
 5. Add ONNX export support

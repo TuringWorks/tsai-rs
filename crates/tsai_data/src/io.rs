@@ -81,6 +81,7 @@ pub fn read_npz<P: AsRef<Path>>(path: P) -> Result<(Array3<f32>, Option<Array2<f
 /// # Returns
 ///
 /// A TSDataset.
+#[cfg(feature = "polars-io")]
 pub fn read_csv<P: AsRef<Path>>(
     path: P,
     n_vars: usize,
@@ -169,6 +170,7 @@ pub fn read_csv<P: AsRef<Path>>(
 /// # Returns
 ///
 /// A TSDataset.
+#[cfg(feature = "polars-io")]
 pub fn read_parquet<P: AsRef<Path>>(
     path: P,
     x_columns: &[&str],

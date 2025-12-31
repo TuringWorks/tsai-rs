@@ -9,10 +9,11 @@ repository.workspace = true
 readme = "README.md"
 
 [features]
-default = ["backend-ndarray"]
+default = ["backend-ndarray", "polars-io"]
 backend-ndarray = ["tsai_core/backend-ndarray"]
 backend-wgpu = ["tsai_core/backend-wgpu"]
 backend-tch = ["tsai_core/backend-tch"]
+polars-io = ["dep:polars", "dep:arrow"]
 
 [dependencies]
 tsai_core = { workspace = true }
@@ -23,8 +24,8 @@ serde_json = { workspace = true }
 
 ndarray = { workspace = true }
 ndarray-npy = { workspace = true }
-polars = { workspace = true }
-arrow = { workspace = true }
+polars = { workspace = true, optional = true }
+arrow = { workspace = true, optional = true }
 
 thiserror = { workspace = true }
 rand = { workspace = true }

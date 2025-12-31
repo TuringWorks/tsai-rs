@@ -39,7 +39,9 @@ pub mod ucr;
 
 pub use dataset::{TSDataset, TSDatasets};
 pub use error::{DataError, Result};
-pub use io::{read_csv, read_npy, read_npz, read_parquet};
+pub use io::{read_npy, read_npz};
+#[cfg(feature = "polars-io")]
+pub use io::{read_csv, read_parquet};
 pub use loader::{TSDataLoader, TSDataLoaderBuilder, TSDataLoaders, TSDataLoadersBuilder};
 pub use sampler::{RandomSampler, SequentialSampler, StratifiedSampler};
 pub use splits::{train_test_split, train_valid_test_split, SplitStrategy};

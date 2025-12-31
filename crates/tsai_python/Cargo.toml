@@ -17,11 +17,14 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 # Internal crates (using path dependencies)
-tsai_core = { path = "../tsai_core" }
-tsai_models = { path = "../tsai_models" }
-tsai_train = { path = "../tsai_train" }
-tsai_transforms = { path = "../tsai_transforms" }
-tsai_analysis = { path = "../tsai_analysis" }
+# Note: We disable polars-io to avoid linking conflicts with pyo3
+tsai_core = { path = "../tsai_core", default-features = false, features = ["backend-ndarray"] }
+tsai_data = { path = "../tsai_data", default-features = false, features = ["backend-ndarray"] }
+tsai_models = { path = "../tsai_models", default-features = false, features = ["backend-ndarray"] }
+tsai_train = { path = "../tsai_train", default-features = false, features = ["backend-ndarray"] }
+tsai_transforms = { path = "../tsai_transforms", default-features = false }
+tsai_analysis = { path = "../tsai_analysis", default-features = false }
+tsai_explain = { path = "../tsai_explain", default-features = false }
 
 # PyO3 and numpy
 pyo3 = { version = "0.22", features = ["extension-module"] }
@@ -32,3 +35,5 @@ ndarray = "0.16"
 burn = { version = "0.16", default-features = false, features = ["std", "autodiff", "ndarray"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rand = "0.8"
+rand_chacha = "0.3"

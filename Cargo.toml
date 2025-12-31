@@ -34,15 +34,15 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-tsai_core = { path = "crates/tsai_core" }
-tsai_data = { path = "crates/tsai_data" }
-tsai_transforms = { path = "crates/tsai_transforms" }
-tsai_models = { path = "crates/tsai_models" }
-tsai_train = { path = "crates/tsai_train" }
-tsai_analysis = { path = "crates/tsai_analysis" }
-tsai_explain = { path = "crates/tsai_explain" }
-tsai = { path = "crates/tsai" }
-tsai_compute = { path = "crates/tsai_compute" }
+tsai_core = { path = "crates/tsai_core", version = "0.1.0" }
+tsai_data = { path = "crates/tsai_data", version = "0.1.0" }
+tsai_transforms = { path = "crates/tsai_transforms", version = "0.1.0" }
+tsai_models = { path = "crates/tsai_models", version = "0.1.0" }
+tsai_train = { path = "crates/tsai_train", version = "0.1.0" }
+tsai_analysis = { path = "crates/tsai_analysis", version = "0.1.0" }
+tsai_explain = { path = "crates/tsai_explain", version = "0.1.0" }
+tsai = { path = "crates/tsai", version = "0.1.0" }
+tsai_compute = { path = "crates/tsai_compute", version = "0.1.0" }
 
 # Burn framework (DL backend)
 burn = "0.16"
@@ -50,7 +50,7 @@ burn-autodiff = "0.16"
 burn-ndarray = "0.16"
 burn-wgpu = "0.16"
 burn-tch = "0.16"
-burn-mlx = { git = "https://github.com/TuringWorks/burn-mlx.git" }
+burn-mlx = "0.1.2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

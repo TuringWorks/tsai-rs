@@ -753,14 +753,15 @@ dependencies = [
 
 [[package]]
 name = "burn-mlx"
-version = "0.1.0"
-source = "git+https://github.com/TuringWorks/burn-mlx.git#d3d53de60fe7409d69f030d314bda342a61d1d89"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34be0d41ae4e4b9fedd2bd40e0240f34122457e6d5661eb36bc70b1cc0a9ee52"
 dependencies = [
  "burn",
  "burn-tensor",
  "derive-new 0.7.0",
  "half",
- "mlx-rs 0.25.3 (git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip)",
+ "mlx-rs-burn",
  "num-traits",
 ]
 
@@ -3799,9 +3800,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mlx-internal-macros"
-version = "0.25.3"
-source = "git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip#f99f7a3cd379c936e5c431b3ad3e781b1555eec0"
+name = "mlx-internal-macros-burn"
+version = "0.25.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e15434c8327ec279c5b9ee7d8bfd2163f2a1f48c2c86cedfa7bba056ef98df25"
 dependencies = [
  "darling 0.21.3",
  "itertools 0.14.0",
@@ -3823,9 +3825,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mlx-macros"
-version = "0.25.3"
-source = "git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip#f99f7a3cd379c936e5c431b3ad3e781b1555eec0"
+name = "mlx-macros-burn"
+version = "0.25.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26b4f051a8e3d0e8b1c3693a6418705311f4766b6d0f25347566f74c0f16ab56"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -3844,9 +3847,9 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "mach-sys",
- "mlx-internal-macros 0.25.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "mlx-macros 0.25.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "mlx-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mlx-internal-macros",
+ "mlx-macros",
+ "mlx-sys",
  "num-complex",
  "num-traits",
  "num_enum",
@@ -3858,18 +3861,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "mlx-rs"
-version = "0.25.3"
-source = "git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip#f99f7a3cd379c936e5c431b3ad3e781b1555eec0"
+name = "mlx-rs-burn"
+version = "0.25.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01731a3240ba4d5fee76289dd915f34b26969689e492e1a18fe22c002fdd6e31"
 dependencies = [
  "dyn-clone",
  "half",
  "itertools 0.14.0",
  "libc",
  "mach-sys",
- "mlx-internal-macros 0.25.3 (git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip)",
- "mlx-macros 0.25.3 (git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip)",
- "mlx-sys 0.2.0 (git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip)",
+ "mlx-internal-macros-burn",
+ "mlx-macros-burn",
+ "mlx-sys-burn",
  "num-complex",
  "num-traits",
  "num_enum",
@@ -3892,9 +3896,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mlx-sys"
-version = "0.2.0"
-source = "git+https://github.com/TuringWorks/mlx-rs.git?branch=feat%2Fadd-slice-scatter-flip#f99f7a3cd379c936e5c431b3ad3e781b1555eec0"
+name = "mlx-sys-burn"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45de2dde1a1dd946d07fdc2711907ebf0b968dde7b6e58d4ed729655788cc8fc"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
@@ -6365,7 +6370,7 @@ dependencies = [
  "cudarc",
  "gpu-allocator",
  "hwlocality",
- "mlx-rs 0.25.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mlx-rs",
  "num_cpus",
  "objc2",
  "objc2-foundation",

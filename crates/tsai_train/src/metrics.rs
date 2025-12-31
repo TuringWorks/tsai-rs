@@ -637,6 +637,83 @@ impl<B: Backend> Metric<B> for MCC {
     }
 }
 
+/// Mean Absolute Percentage Error (MAPE) metric.
+///
+/// MAPE = (1/n) * Σ |y_true - y_pred| / |y_true| * 100
+///
+/// Commonly used for forecasting and regression tasks.
+/// Note: This metric is undefined when y_true = 0. Values where
+/// |y_true| < epsilon are skipped.
+#[derive(Debug, Clone)]
+pub struct MAPE {
+    /// Small epsilon to avoid division by zero.
+    epsilon: f32,
+}
+
+impl MAPE {
+    /// Create a new MAPE metric.
+    pub fn new() -> Self {
+        Self { epsilon: 1e-8 }
+    }
+
+    /// Create a new MAPE metric with custom epsilon.
+    pub fn with_epsilon(epsilon: f32) -> Self {
+        Self { epsilon }
+    }
+}
+
+impl Default for MAPE {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<B: Backend> Metric<B> for MAPE {
+    fn compute(&self, preds: &Tensor<B, 2>, targets: &Tensor<B, 2>) -> f32 {
+        let pred_data = preds.clone().into_data();
+        let target_data = targets.clone().into_data();
+
+        let pred_vec: Vec<f32> = pred_data
+            .as_slice()
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
+        let target_vec: Vec<f32> = target_data
+            .as_slice()
+            .map(|s| s.to_vec())
+            .unwrap_or_default();
+
+        if pred_vec.is_empty() || target_vec.is_empty() {
+            return 0.0;
+        }
+
+        let mut total_ape = 0.0;
+        let mut valid_count = 0;
+
+        for (pred, target) in pred_vec.iter().zip(target_vec.iter()) {
+            let abs_target = target.abs();
+            if abs_target > self.epsilon {
+                let ape = (target - pred).abs() / abs_target;
+                total_ape += ape;
+                valid_count += 1;
+            }
+        }
+
+        if valid_count > 0 {
+            (total_ape / valid_count as f32) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    fn name(&self) -> &str {
+        "mape"
+    }
+
+    fn higher_is_better(&self) -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,5 +782,22 @@ mod tests {
         let labels: Vec<bool> = vec![];
         let auc = AUC::compute_binary_auc(&probs, &labels);
         assert!((auc - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_mape_metric() {
+        let mape = MAPE::new();
+        assert_eq!(<MAPE as Metric<TestBackend>>::name(&mape), "mape");
+        assert!(!<MAPE as Metric<TestBackend>>::higher_is_better(&mape));
+
+        // Test with custom epsilon
+        let mape_custom = MAPE::with_epsilon(1e-6);
+        assert_eq!(mape_custom.epsilon, 1e-6);
+    }
+
+    #[test]
+    fn test_mape_default() {
+        let mape = MAPE::default();
+        assert_eq!(mape.epsilon, 1e-8);
     }
 }

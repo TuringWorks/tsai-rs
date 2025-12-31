@@ -2279,6 +2279,1654 @@ impl<B: Backend> Transform<B> for TSVerticalFlip {
     }
 }
 
+// ============================================================================
+// Magnitude-based Noise Transforms
+// ============================================================================
+
+/// Configuration for magnitude-scaled additive noise.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagAddNoiseConfig {
+    /// Noise magnitude as a fraction of the signal magnitude.
+    pub magnitude: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for MagAddNoiseConfig {
+    fn default() -> Self {
+        Self {
+            magnitude: 0.1,
+            p: 0.5,
+        }
+    }
+}
+
+/// Adds noise scaled by the magnitude of the time series.
+///
+/// The noise at each time step is scaled by the absolute value of the signal,
+/// making the noise proportional to the signal strength.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::MagAddNoise;
+///
+/// let transform = MagAddNoise::new(0.1);  // 10% magnitude noise
+/// ```
+pub struct MagAddNoise {
+    config: MagAddNoiseConfig,
+    seed: Seed,
+}
+
+impl MagAddNoise {
+    /// Create a new magnitude-scaled additive noise transform.
+    #[must_use]
+    pub fn new(magnitude: f32) -> Self {
+        Self {
+            config: MagAddNoiseConfig {
+                magnitude,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: MagAddNoiseConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for MagAddNoise {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        // Add noise scaled by magnitude
+        let mut noisy_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for i in 0..x_values.len() {
+            let mag = x_values[i].abs();
+            // Sample from normal distribution
+            let u1: f32 = rng.gen();
+            let u2: f32 = rng.gen();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+            let noise = z * self.config.magnitude * mag;
+            noisy_values[i] = x_values[i] + noise;
+        }
+
+        let noisy_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(noisy_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(noisy_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "MagAddNoise"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for magnitude-scaled multiplicative noise.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagMulNoiseConfig {
+    /// Noise magnitude (standard deviation of the multiplier).
+    pub magnitude: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for MagMulNoiseConfig {
+    fn default() -> Self {
+        Self {
+            magnitude: 0.1,
+            p: 0.5,
+        }
+    }
+}
+
+/// Multiplies the time series by magnitude-scaled noise.
+///
+/// Each value is multiplied by (1 + noise), where noise is sampled
+/// from a normal distribution with the specified magnitude.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::MagMulNoise;
+///
+/// let transform = MagMulNoise::new(0.1);  // 10% multiplicative noise
+/// ```
+pub struct MagMulNoise {
+    config: MagMulNoiseConfig,
+    seed: Seed,
+}
+
+impl MagMulNoise {
+    /// Create a new magnitude-scaled multiplicative noise transform.
+    #[must_use]
+    pub fn new(magnitude: f32) -> Self {
+        Self {
+            config: MagMulNoiseConfig {
+                magnitude,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: MagMulNoiseConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for MagMulNoise {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        // Multiply by (1 + noise)
+        let mut noisy_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for i in 0..x_values.len() {
+            // Sample from normal distribution
+            let u1: f32 = rng.gen();
+            let u2: f32 = rng.gen();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+            let multiplier = 1.0 + z * self.config.magnitude;
+            noisy_values[i] = x_values[i] * multiplier;
+        }
+
+        let noisy_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(noisy_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(noisy_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "MagMulNoise"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// ============================================================================
+// Variable and Mask Dropout Transforms
+// ============================================================================
+
+/// Configuration for mask-based dropout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaskOutConfig {
+    /// Maximum fraction of time steps to mask.
+    pub max_mask_ratio: f32,
+    /// Value to fill masked regions.
+    pub fill_value: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for MaskOutConfig {
+    fn default() -> Self {
+        Self {
+            max_mask_ratio: 0.2,
+            fill_value: 0.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Randomly masks out portions of the time series with a specified value.
+///
+/// Unlike CutOut which masks contiguous regions, MaskOut can mask
+/// random scattered time steps.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::MaskOut;
+///
+/// let transform = MaskOut::new(0.15);  // Mask up to 15% of time steps
+/// ```
+pub struct MaskOut {
+    config: MaskOutConfig,
+    seed: Seed,
+}
+
+impl MaskOut {
+    /// Create a new mask-out transform.
+    #[must_use]
+    pub fn new(max_mask_ratio: f32) -> Self {
+        Self {
+            config: MaskOutConfig {
+                max_mask_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: MaskOutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the fill value for masked regions.
+    #[must_use]
+    pub fn with_fill_value(mut self, fill_value: f32) -> Self {
+        self.config.fill_value = fill_value;
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for MaskOut {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let mut x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        // Calculate number of time steps to mask
+        let mask_ratio: f32 = rng.gen_range(0.0..self.config.max_mask_ratio);
+        let n_mask = ((seq_len as f32 * mask_ratio).round() as usize).max(1);
+
+        for b in 0..batch_size {
+            // Select random time steps to mask
+            let mut indices: Vec<usize> = (0..seq_len).collect();
+            // Fisher-Yates shuffle to select first n_mask indices
+            for i in 0..n_mask.min(seq_len) {
+                let j = rng.gen_range(i..seq_len);
+                indices.swap(i, j);
+            }
+
+            // Mask selected time steps across all variables
+            for &t in indices.iter().take(n_mask) {
+                for v in 0..n_vars {
+                    let idx = b * n_vars * seq_len + v * seq_len + t;
+                    x_values[idx] = self.config.fill_value;
+                }
+            }
+        }
+
+        let masked_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(x_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(masked_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "MaskOut"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for variable dropout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VarOutConfig {
+    /// Maximum fraction of variables to drop.
+    pub max_drop_ratio: f32,
+    /// Value to fill dropped variables.
+    pub fill_value: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for VarOutConfig {
+    fn default() -> Self {
+        Self {
+            max_drop_ratio: 0.2,
+            fill_value: 0.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Randomly drops out entire variables (channels) from the time series.
+///
+/// This is useful for multivariate time series to encourage the model
+/// to learn robust features across different variable combinations.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::VarOut;
+///
+/// let transform = VarOut::new(0.2);  // Drop up to 20% of variables
+/// ```
+pub struct VarOut {
+    config: VarOutConfig,
+    seed: Seed,
+}
+
+impl VarOut {
+    /// Create a new variable dropout transform.
+    #[must_use]
+    pub fn new(max_drop_ratio: f32) -> Self {
+        Self {
+            config: VarOutConfig {
+                max_drop_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: VarOutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the fill value for dropped variables.
+    #[must_use]
+    pub fn with_fill_value(mut self, fill_value: f32) -> Self {
+        self.config.fill_value = fill_value;
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for VarOut {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        if n_vars <= 1 {
+            // Cannot drop variables if only one exists
+            return Ok(batch);
+        }
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let mut x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        // Calculate number of variables to drop
+        let drop_ratio: f32 = rng.gen_range(0.0..self.config.max_drop_ratio);
+        let n_drop = ((n_vars as f32 * drop_ratio).round() as usize).min(n_vars - 1);
+
+        if n_drop == 0 {
+            let tensor: Tensor<B, 3> =
+                Tensor::<B, 1>::from_floats(x_values.as_slice(), &device)
+                    .reshape([batch_size, n_vars, seq_len]);
+            return Ok(TSBatch {
+                x: TSTensor::new(tensor)?,
+                y: batch.y,
+                mask: batch.mask,
+            });
+        }
+
+        for b in 0..batch_size {
+            // Select random variables to drop
+            let mut var_indices: Vec<usize> = (0..n_vars).collect();
+            for i in 0..n_drop {
+                let j = rng.gen_range(i..n_vars);
+                var_indices.swap(i, j);
+            }
+
+            // Drop selected variables
+            for &v in var_indices.iter().take(n_drop) {
+                for t in 0..seq_len {
+                    let idx = b * n_vars * seq_len + v * seq_len + t;
+                    x_values[idx] = self.config.fill_value;
+                }
+            }
+        }
+
+        let dropped_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(x_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(dropped_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "VarOut"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// ============================================================================
+// RandAugment - Automatic Augmentation
+// ============================================================================
+
+/// Available transforms for RandAugment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RandAugmentOp {
+    /// Gaussian noise
+    GaussianNoise,
+    /// Magnitude-scaled additive noise
+    MagAddNoise,
+    /// Magnitude-scaled multiplicative noise
+    MagMulNoise,
+    /// Time warping
+    TimeWarp,
+    /// Magnitude warping
+    MagWarp,
+    /// Window warping
+    WindowWarp,
+    /// Magnitude scaling
+    MagScale,
+    /// Cutout/masking
+    CutOut,
+    /// Random mask-out
+    MaskOut,
+    /// Horizontal flip (time reversal)
+    HorizontalFlip,
+    /// Random shift
+    RandomShift,
+    /// Permutation
+    Permutation,
+    /// Rotation
+    Rotation,
+}
+
+impl RandAugmentOp {
+    /// Get all available operations.
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::GaussianNoise,
+            Self::MagAddNoise,
+            Self::MagMulNoise,
+            Self::TimeWarp,
+            Self::MagWarp,
+            Self::WindowWarp,
+            Self::MagScale,
+            Self::CutOut,
+            Self::MaskOut,
+            Self::HorizontalFlip,
+            Self::RandomShift,
+            Self::Permutation,
+            Self::Rotation,
+        ]
+    }
+}
+
+/// Configuration for RandAugment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandAugmentConfig {
+    /// Number of transforms to apply.
+    pub n: usize,
+    /// Magnitude of transforms (0.0 to 1.0).
+    pub magnitude: f32,
+    /// Available operations to sample from.
+    pub ops: Vec<RandAugmentOp>,
+    /// Probability of applying any augmentation.
+    pub p: f32,
+}
+
+impl Default for RandAugmentConfig {
+    fn default() -> Self {
+        Self {
+            n: 2,
+            magnitude: 0.5,
+            ops: RandAugmentOp::all(),
+            p: 1.0,
+        }
+    }
+}
+
+/// RandAugment: Practical automated data augmentation.
+///
+/// Randomly samples N transforms from a pool and applies them with
+/// a specified magnitude. Based on the paper "RandAugment: Practical
+/// automated data augmentation with a reduced search space".
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandAugment;
+///
+/// let transform = RandAugment::new(2, 0.5);  // Apply 2 transforms at 50% magnitude
+/// ```
+pub struct RandAugment {
+    config: RandAugmentConfig,
+    seed: Seed,
+}
+
+impl RandAugment {
+    /// Create a new RandAugment transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `n` - Number of transforms to apply
+    /// * `magnitude` - Magnitude of transforms (0.0 to 1.0)
+    #[must_use]
+    pub fn new(n: usize, magnitude: f32) -> Self {
+        Self {
+            config: RandAugmentConfig {
+                n,
+                magnitude: magnitude.clamp(0.0, 1.0),
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandAugmentConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the available operations.
+    #[must_use]
+    pub fn with_ops(mut self, ops: Vec<RandAugmentOp>) -> Self {
+        self.config.ops = ops;
+        self
+    }
+
+    /// Set the probability of applying augmentation.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Apply a single operation to the batch.
+    fn apply_op<B: Backend>(
+        &self,
+        batch: TSBatch<B>,
+        op: RandAugmentOp,
+        rng: &mut impl Rng,
+    ) -> Result<TSBatch<B>> {
+        let m = self.config.magnitude;
+
+        match op {
+            RandAugmentOp::GaussianNoise => {
+                let transform = GaussianNoise::new(m * 0.3)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::MagAddNoise => {
+                let transform = MagAddNoise::new(m * 0.2)
+                    .with_probability(1.0)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::MagMulNoise => {
+                let transform = MagMulNoise::new(m * 0.2)
+                    .with_probability(1.0)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::TimeWarp => {
+                let transform = TimeWarp::new(m * 0.4)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::MagWarp => {
+                let transform = MagWarp::new(m * 0.3)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::WindowWarp => {
+                let transform = WindowWarp::new(m * 0.3)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::MagScale => {
+                let transform = MagScale::new(1.0 + m * 0.5)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::CutOut => {
+                let transform = CutOut::new(m * 0.3)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::MaskOut => {
+                let transform = MaskOut::new(m * 0.2)
+                    .with_probability(1.0)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::HorizontalFlip => {
+                let config = HorizontalFlipConfig { p: 1.0 };
+                let transform = HorizontalFlip::from_config(config)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::RandomShift => {
+                let config = RandomShiftConfig {
+                    max_shift: m * 0.3,
+                    p: 1.0,
+                    ..Default::default()
+                };
+                let transform = RandomShift::from_config(config)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::Permutation => {
+                let n_segments = ((m * 10.0).round() as usize).max(2);
+                let config = PermutationConfig {
+                    n_segments,
+                    p: 1.0,
+                };
+                let transform = Permutation::from_config(config)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+            RandAugmentOp::Rotation => {
+                // Use new() - default p=0.5 is fine since we already decided to apply
+                let transform = Rotation::new(m * 0.5)
+                    .with_seed(Seed::new(rng.gen()));
+                transform.apply(batch, Split::Train)
+            }
+        }
+    }
+}
+
+impl<B: Backend> Transform<B> for RandAugment {
+    fn apply(&self, mut batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        if self.config.ops.is_empty() {
+            return Ok(batch);
+        }
+
+        // Randomly select N operations
+        for _ in 0..self.config.n {
+            let op_idx = rng.gen_range(0..self.config.ops.len());
+            let op = self.config.ops[op_idx];
+            batch = self.apply_op(batch, op, &mut rng)?;
+        }
+
+        Ok(batch)
+    }
+
+    fn name(&self) -> &str {
+        "RandAugment"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// ============================================================================
+// Random Resized Crop Transform
+// ============================================================================
+
+/// Configuration for random resized crop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomResizedCropConfig {
+    /// Minimum crop ratio (fraction of original length).
+    pub min_ratio: f32,
+    /// Maximum crop ratio (fraction of original length).
+    pub max_ratio: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomResizedCropConfig {
+    fn default() -> Self {
+        Self {
+            min_ratio: 0.5,
+            max_ratio: 1.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Randomly crops and resizes the time series to the original length.
+///
+/// Crops a random portion of the time series and then resizes it back
+/// to the original length using linear interpolation.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomResizedCrop;
+///
+/// let transform = RandomResizedCrop::new(0.5, 1.0);  // Crop 50-100% of length
+/// ```
+pub struct RandomResizedCrop {
+    config: RandomResizedCropConfig,
+    seed: Seed,
+}
+
+impl RandomResizedCrop {
+    /// Create a new random resized crop transform.
+    #[must_use]
+    pub fn new(min_ratio: f32, max_ratio: f32) -> Self {
+        Self {
+            config: RandomResizedCropConfig {
+                min_ratio,
+                max_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomResizedCropConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomResizedCrop {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        if seq_len <= 1 {
+            return Ok(batch);
+        }
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let mut cropped_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            // Random crop ratio for this sample
+            let crop_ratio = rng.gen_range(self.config.min_ratio..=self.config.max_ratio);
+            let crop_len = ((seq_len as f32 * crop_ratio).round() as usize).max(2);
+
+            // Random start position
+            let max_start = seq_len.saturating_sub(crop_len);
+            let start = if max_start > 0 {
+                rng.gen_range(0..=max_start)
+            } else {
+                0
+            };
+
+            // Resize cropped region back to original length using linear interpolation
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    // Map target position to source position
+                    let src_pos = start as f32 + (t as f32 / seq_len as f32) * (crop_len - 1) as f32;
+                    let idx_low = src_pos.floor() as usize;
+                    let idx_high = (idx_low + 1).min(start + crop_len - 1);
+                    let frac = src_pos - src_pos.floor();
+
+                    let src_low = b * n_vars * seq_len + v * seq_len + idx_low;
+                    let src_high = b * n_vars * seq_len + v * seq_len + idx_high;
+                    let dst = b * n_vars * seq_len + v * seq_len + t;
+
+                    cropped_values[dst] =
+                        x_values[src_low] * (1.0 - frac) + x_values[src_high] * frac;
+                }
+            }
+        }
+
+        let cropped_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(cropped_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(cropped_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomResizedCrop"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// ============================================================================
+// Time Noise Transform
+// ============================================================================
+
+/// Configuration for time noise transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeNoiseConfig {
+    /// Maximum jitter as fraction of sequence length.
+    pub max_jitter: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for TimeNoiseConfig {
+    fn default() -> Self {
+        Self {
+            max_jitter: 0.1,
+            p: 0.5,
+        }
+    }
+}
+
+/// Adds noise to the time dimension by jittering time indices.
+///
+/// This transform perturbs the time axis by adding random offsets to each
+/// time step's position, then interpolating to get the new values.
+/// Useful for making models robust to timing variations.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::TimeNoise;
+///
+/// let transform = TimeNoise::new(0.1);  // Up to 10% jitter
+/// ```
+pub struct TimeNoise {
+    config: TimeNoiseConfig,
+    seed: Seed,
+}
+
+impl TimeNoise {
+    /// Create a new time noise transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_jitter` - Maximum jitter as fraction of sequence length
+    #[must_use]
+    pub fn new(max_jitter: f32) -> Self {
+        Self {
+            config: TimeNoiseConfig {
+                max_jitter,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: TimeNoiseConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for TimeNoise {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        if seq_len <= 2 {
+            return Ok(batch);
+        }
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let max_jitter_samples = (self.config.max_jitter * seq_len as f32) as i32;
+        let mut jittered_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            // Generate random jitter for each time step
+            let jitter: Vec<f32> = (0..seq_len)
+                .map(|_| {
+                    if max_jitter_samples > 0 {
+                        rng.gen_range(-max_jitter_samples..=max_jitter_samples) as f32
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    // Calculate source position with jitter
+                    let src_pos = (t as f32 + jitter[t]).clamp(0.0, (seq_len - 1) as f32);
+                    let idx_low = src_pos.floor() as usize;
+                    let idx_high = (idx_low + 1).min(seq_len - 1);
+                    let frac = src_pos - src_pos.floor();
+
+                    let src_low = b * n_vars * seq_len + v * seq_len + idx_low;
+                    let src_high = b * n_vars * seq_len + v * seq_len + idx_high;
+                    let dst = b * n_vars * seq_len + v * seq_len + t;
+
+                    jittered_values[dst] =
+                        x_values[src_low] * (1.0 - frac) + x_values[src_high] * frac;
+                }
+            }
+        }
+
+        let jittered_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(jittered_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(jittered_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "TimeNoise"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// ============================================================================
+// Blur/Smoothing Transforms
+// ============================================================================
+
+/// Configuration for Gaussian blur transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlurConfig {
+    /// Kernel size (odd number, e.g., 3, 5, 7).
+    pub kernel_size: usize,
+    /// Standard deviation of Gaussian kernel.
+    pub sigma: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for BlurConfig {
+    fn default() -> Self {
+        Self {
+            kernel_size: 5,
+            sigma: 1.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Applies Gaussian blur to the time series.
+///
+/// Convolves the time series with a 1D Gaussian kernel to smooth out
+/// high-frequency noise. Useful for data augmentation and denoising.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::Blur;
+///
+/// let transform = Blur::new(5, 1.0);  // 5-point kernel with sigma=1.0
+/// ```
+pub struct Blur {
+    config: BlurConfig,
+    seed: Seed,
+}
+
+impl Blur {
+    /// Create a new blur transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `kernel_size` - Size of the Gaussian kernel (should be odd)
+    /// * `sigma` - Standard deviation of the Gaussian
+    #[must_use]
+    pub fn new(kernel_size: usize, sigma: f32) -> Self {
+        // Ensure kernel size is odd
+        let kernel_size = if kernel_size % 2 == 0 {
+            kernel_size + 1
+        } else {
+            kernel_size
+        };
+
+        Self {
+            config: BlurConfig {
+                kernel_size,
+                sigma,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: BlurConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Generate Gaussian kernel.
+    fn gaussian_kernel(&self) -> Vec<f32> {
+        let half_size = self.config.kernel_size / 2;
+        let sigma = self.config.sigma;
+
+        let mut kernel: Vec<f32> = (0..self.config.kernel_size)
+            .map(|i| {
+                let x = i as f32 - half_size as f32;
+                (-x * x / (2.0 * sigma * sigma)).exp()
+            })
+            .collect();
+
+        // Normalize
+        let sum: f32 = kernel.iter().sum();
+        for k in &mut kernel {
+            *k /= sum;
+        }
+
+        kernel
+    }
+}
+
+impl<B: Backend> Transform<B> for Blur {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        if seq_len < self.config.kernel_size {
+            return Ok(batch);
+        }
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let kernel = self.gaussian_kernel();
+        let half_size = self.config.kernel_size / 2;
+        let mut blurred_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    let mut sum = 0.0f32;
+                    let mut weight_sum = 0.0f32;
+
+                    for (k, &kernel_val) in kernel.iter().enumerate() {
+                        let src_t = t as i32 - half_size as i32 + k as i32;
+                        if src_t >= 0 && src_t < seq_len as i32 {
+                            let src_idx = b * n_vars * seq_len + v * seq_len + src_t as usize;
+                            sum += x_values[src_idx] * kernel_val;
+                            weight_sum += kernel_val;
+                        }
+                    }
+
+                    let dst = b * n_vars * seq_len + v * seq_len + t;
+                    blurred_values[dst] = if weight_sum > 0.0 {
+                        sum / weight_sum
+                    } else {
+                        x_values[dst]
+                    };
+                }
+            }
+        }
+
+        let blurred_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(blurred_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(blurred_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "Blur"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Smoothing method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmoothingMethod {
+    /// Simple moving average.
+    MovingAverage,
+    /// Exponential moving average.
+    Exponential,
+    /// Savitzky-Golay filter (polynomial smoothing).
+    SavitzkyGolay,
+}
+
+impl Default for SmoothingMethod {
+    fn default() -> Self {
+        Self::MovingAverage
+    }
+}
+
+/// Configuration for smoothing transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmoothConfig {
+    /// Smoothing method.
+    pub method: SmoothingMethod,
+    /// Window size for moving average.
+    pub window_size: usize,
+    /// Alpha for exponential smoothing (0-1).
+    pub alpha: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for SmoothConfig {
+    fn default() -> Self {
+        Self {
+            method: SmoothingMethod::MovingAverage,
+            window_size: 5,
+            alpha: 0.3,
+            p: 0.5,
+        }
+    }
+}
+
+/// Applies various smoothing filters to the time series.
+///
+/// Supports multiple smoothing methods:
+/// - Moving average: Simple window-based averaging
+/// - Exponential: Exponential moving average with decay
+/// - Savitzky-Golay: Polynomial smoothing for better edge preservation
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::{Smooth, SmoothingMethod};
+///
+/// let transform = Smooth::new(SmoothingMethod::MovingAverage)
+///     .with_window_size(5);
+/// ```
+pub struct Smooth {
+    config: SmoothConfig,
+    seed: Seed,
+}
+
+impl Smooth {
+    /// Create a new smoothing transform.
+    #[must_use]
+    pub fn new(method: SmoothingMethod) -> Self {
+        Self {
+            config: SmoothConfig {
+                method,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: SmoothConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the window size for moving average.
+    #[must_use]
+    pub fn with_window_size(mut self, window_size: usize) -> Self {
+        self.config.window_size = window_size;
+        self
+    }
+
+    /// Set the alpha for exponential smoothing.
+    #[must_use]
+    pub fn with_alpha(mut self, alpha: f32) -> Self {
+        self.config.alpha = alpha.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Apply moving average smoothing.
+    fn moving_average(&self, values: &[f32], n_vars: usize, seq_len: usize) -> Vec<f32> {
+        let batch_size = values.len() / (n_vars * seq_len);
+        let half_window = self.config.window_size / 2;
+        let mut smoothed = values.to_vec();
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    let mut sum = 0.0f32;
+                    let mut count = 0;
+
+                    for offset in 0..self.config.window_size {
+                        let src_t = t as i32 - half_window as i32 + offset as i32;
+                        if src_t >= 0 && src_t < seq_len as i32 {
+                            let idx = b * n_vars * seq_len + v * seq_len + src_t as usize;
+                            sum += values[idx];
+                            count += 1;
+                        }
+                    }
+
+                    let dst = b * n_vars * seq_len + v * seq_len + t;
+                    smoothed[dst] = if count > 0 { sum / count as f32 } else { values[dst] };
+                }
+            }
+        }
+
+        smoothed
+    }
+
+    /// Apply exponential smoothing.
+    fn exponential_smooth(&self, values: &[f32], n_vars: usize, seq_len: usize) -> Vec<f32> {
+        let batch_size = values.len() / (n_vars * seq_len);
+        let alpha = self.config.alpha;
+        let mut smoothed = values.to_vec();
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                // Forward pass
+                let base = b * n_vars * seq_len + v * seq_len;
+                let mut ema = values[base];
+
+                for t in 0..seq_len {
+                    let idx = base + t;
+                    ema = alpha * values[idx] + (1.0 - alpha) * ema;
+                    smoothed[idx] = ema;
+                }
+            }
+        }
+
+        smoothed
+    }
+
+    /// Apply Savitzky-Golay filter (simplified quadratic fit).
+    fn savitzky_golay(&self, values: &[f32], n_vars: usize, seq_len: usize) -> Vec<f32> {
+        let batch_size = values.len() / (n_vars * seq_len);
+        let half_window = self.config.window_size / 2;
+
+        // Precompute Savitzky-Golay coefficients for quadratic fit
+        // Using simplified weights for window_size=5: [-3, 12, 17, 12, -3] / 35
+        let coeffs: Vec<f32> = match self.config.window_size {
+            3 => vec![0.25, 0.5, 0.25],
+            5 => vec![-3.0 / 35.0, 12.0 / 35.0, 17.0 / 35.0, 12.0 / 35.0, -3.0 / 35.0],
+            7 => vec![
+                -2.0 / 21.0,
+                3.0 / 21.0,
+                6.0 / 21.0,
+                7.0 / 21.0,
+                6.0 / 21.0,
+                3.0 / 21.0,
+                -2.0 / 21.0,
+            ],
+            _ => {
+                // Default to moving average weights
+                vec![1.0 / self.config.window_size as f32; self.config.window_size]
+            }
+        };
+
+        let mut smoothed = values.to_vec();
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    let mut sum = 0.0f32;
+                    let mut weight_sum = 0.0f32;
+
+                    for (k, &coeff) in coeffs.iter().enumerate() {
+                        let src_t = t as i32 - half_window as i32 + k as i32;
+                        if src_t >= 0 && src_t < seq_len as i32 {
+                            let idx = b * n_vars * seq_len + v * seq_len + src_t as usize;
+                            sum += values[idx] * coeff;
+                            weight_sum += coeff.abs();
+                        }
+                    }
+
+                    let dst = b * n_vars * seq_len + v * seq_len + t;
+                    smoothed[dst] = if weight_sum > 0.0 {
+                        sum / weight_sum * coeffs.iter().map(|c| c.abs()).sum::<f32>()
+                    } else {
+                        values[dst]
+                    };
+                }
+            }
+        }
+
+        smoothed
+    }
+}
+
+impl<B: Backend> Transform<B> for Smooth {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        if seq_len < self.config.window_size {
+            return Ok(batch);
+        }
+
+        // Get data as raw values
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let smoothed_values = match self.config.method {
+            SmoothingMethod::MovingAverage => self.moving_average(&x_values, n_vars, seq_len),
+            SmoothingMethod::Exponential => self.exponential_smooth(&x_values, n_vars, seq_len),
+            SmoothingMethod::SavitzkyGolay => self.savitzky_golay(&x_values, n_vars, seq_len),
+        };
+
+        let smoothed_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(smoothed_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(smoothed_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "Smooth"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

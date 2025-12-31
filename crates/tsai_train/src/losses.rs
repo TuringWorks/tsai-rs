@@ -287,6 +287,59 @@ impl Default for LabelSmoothingLoss {
     }
 }
 
+/// Log-Cosh Loss for regression.
+///
+/// Log-Cosh is the logarithm of the hyperbolic cosine of the prediction error.
+/// It's similar to MSE for small errors but is less sensitive to outliers.
+///
+/// L = log(cosh(pred - target))
+///   ≈ (pred - target)^2 / 2   for small errors
+///   ≈ |pred - target| - log(2)   for large errors
+///
+/// This makes it robust to outliers while maintaining smooth gradients.
+#[derive(Debug, Default)]
+pub struct LogCoshLoss;
+
+impl LogCoshLoss {
+    /// Create a new Log-Cosh loss.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Compute the loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `preds` - Predictions of shape (batch, features)
+    /// * `targets` - Targets of shape (batch, features)
+    ///
+    /// # Returns
+    ///
+    /// Scalar loss tensor of shape (1,)
+    pub fn forward<B: Backend>(&self, preds: Tensor<B, 2>, targets: Tensor<B, 2>) -> Tensor<B, 1> {
+        let diff = preds - targets;
+        let device = diff.device();
+
+        // Get tensor data
+        let diff_data: Vec<f32> = diff.into_data().to_vec().unwrap();
+
+        // Compute log(cosh(x)) = log((exp(x) + exp(-x)) / 2)
+        // For numerical stability: log(cosh(x)) = |x| + log(1 + exp(-2|x|)) - log(2)
+        let log_cosh_values: Vec<f32> = diff_data
+            .iter()
+            .map(|&x| {
+                let abs_x = x.abs();
+                // Numerically stable computation
+                abs_x + (1.0 + (-2.0 * abs_x).exp()).ln() - std::f32::consts::LN_2
+            })
+            .collect();
+
+        // Compute mean
+        let mean: f32 = log_cosh_values.iter().sum::<f32>() / log_cosh_values.len() as f32;
+        Tensor::<B, 1>::from_floats([mean], &device)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +384,12 @@ mod tests {
 
         let default_loss = LabelSmoothingLoss::default();
         assert_eq!(default_loss.smoothing, 0.1);
+    }
+
+    #[test]
+    fn test_log_cosh_loss_creation() {
+        let _loss = LogCoshLoss::new();
+        let _default_loss = LogCoshLoss::default();
+        // Just verify it can be created
     }
 }

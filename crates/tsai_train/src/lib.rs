@@ -46,8 +46,8 @@ pub use callback::{
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};
-pub use losses::{CrossEntropyLoss, FocalLoss, HuberLoss, LabelSmoothingLoss, MSELoss};
-pub use metrics::{Accuracy, F1Score, Metric, Precision, Recall, AUC, MCC, MAE, MSE, RMSE};
+pub use losses::{CrossEntropyLoss, FocalLoss, HuberLoss, LabelSmoothingLoss, LogCoshLoss, MSELoss};
+pub use metrics::{Accuracy, F1Score, Metric, Precision, Recall, AUC, MCC, MAE, MAPE, MSE, RMSE};
 pub use scheduler::{
     ConstantLR, CosineAnnealingLR, CosineAnnealingWarmRestarts, ExponentialLR, LinearWarmup,
     OneCycleLR, PolynomialLR, ReduceLROnPlateau, ReduceMode, Scheduler, StepLR,

@@ -6298,7 +6298,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tsai"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "approx",
@@ -6322,7 +6322,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_analysis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",
@@ -6339,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "burn",
@@ -6360,7 +6360,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_compute"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "ash",
@@ -6386,7 +6386,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",
@@ -6404,7 +6404,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "arrow-array",
@@ -6428,7 +6428,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_explain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",
@@ -6442,7 +6442,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_models"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",
@@ -6458,7 +6458,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_train"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",
@@ -6483,7 +6483,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_transforms"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "burn",

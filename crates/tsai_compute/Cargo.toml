@@ -1,10 +1,10 @@
 [package]
 name = "tsai_compute"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Heterogeneous compute abstraction layer for tsai-rs"
 license = "Apache-2.0"
-repository = "https://github.com/timeseriesAI/tsai-rs"
+repository = "https://github.com/TuringWorks/tsai-rs"
 keywords = ["compute", "gpu", "cuda", "metal", "vulkan"]
 categories = ["science", "hardware-support"]
 readme = "../../README.md"

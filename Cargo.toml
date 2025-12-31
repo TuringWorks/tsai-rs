@@ -20,12 +20,12 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["tsai-rs contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/timeseriesAI/tsai-rs"
-homepage = "https://github.com/timeseriesAI/tsai-rs"
+repository = "https://github.com/TuringWorks/tsai-rs"
+homepage = "https://github.com/TuringWorks/tsai-rs"
 documentation = "https://docs.rs/tsai"
 readme = "README.md"
 keywords = ["time-series", "deep-learning", "machine-learning", "neural-network"]
@@ -34,15 +34,15 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-tsai_core = { path = "crates/tsai_core", version = "0.1.0" }
-tsai_data = { path = "crates/tsai_data", version = "0.1.0" }
-tsai_transforms = { path = "crates/tsai_transforms", version = "0.1.0" }
-tsai_models = { path = "crates/tsai_models", version = "0.1.0" }
-tsai_train = { path = "crates/tsai_train", version = "0.1.0" }
-tsai_analysis = { path = "crates/tsai_analysis", version = "0.1.0" }
-tsai_explain = { path = "crates/tsai_explain", version = "0.1.0" }
-tsai = { path = "crates/tsai", version = "0.1.0" }
-tsai_compute = { path = "crates/tsai_compute", version = "0.1.0" }
+tsai_core = { path = "crates/tsai_core", version = "0.1.1" }
+tsai_data = { path = "crates/tsai_data", version = "0.1.1" }
+tsai_transforms = { path = "crates/tsai_transforms", version = "0.1.1" }
+tsai_models = { path = "crates/tsai_models", version = "0.1.1" }
+tsai_train = { path = "crates/tsai_train", version = "0.1.1" }
+tsai_analysis = { path = "crates/tsai_analysis", version = "0.1.1" }
+tsai_explain = { path = "crates/tsai_explain", version = "0.1.1" }
+tsai = { path = "crates/tsai", version = "0.1.1" }
+tsai_compute = { path = "crates/tsai_compute", version = "0.1.1" }
 
 # Burn framework (DL backend)
 burn = "0.16"

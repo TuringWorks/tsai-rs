@@ -8,12 +8,13 @@
 
 ## Features
 
-- **Comprehensive Model Zoo**: InceptionTimePlus, PatchTST, MiniRocket, RNNPlus, and more
-- **Data Augmentation**: 30+ time series transforms (noise, warping, masking, etc.)
-- **Training Framework**: Callbacks, schedulers, metrics, and checkpointing
+- **Comprehensive Model Zoo**: 16+ architectures including InceptionTimePlus, PatchTST, TSTPlus, MiniRocket, RNNPlus, FCN, and more
+- **Data Augmentation**: 17+ time series transforms (noise, warping, masking, SpecAugment, etc.)
+- **Training Framework**: 8 callbacks, 9 schedulers, 9 metrics, 5 loss functions, and checkpointing
 - **Analysis Tools**: Confusion matrix, top losses, permutation importance
 - **Explainability**: GradCAM, attention visualization, attribution maps
-- **Multiple Backends**: CPU (ndarray), GPU (WGPU/Metal), or PyTorch (tch)
+- **Multiple Backends**: CPU (ndarray), GPU (WGPU/Metal), Apple MLX, or PyTorch (tch)
+- **Python Bindings**: Use from Python via `tsai_rs` package
 
 ## Quick Start
 
@@ -104,24 +105,22 @@ tsai = { version = "0.1", features = ["backend-mlx"] }
 - `XceptionTimePlus` - Xception-inspired architecture
 - `OmniScaleCNN` - Multi-scale CNN
 - `XCMPlus` - Explainable CNN
+- `FCN` - Fully Convolutional Network
 
 ### Transformer Models
 - `TSTPlus` - Time Series Transformer
+- `TSiTPlus` - Improved TS Transformer with multiple PE options
 - `TSPerceiver` - Perceiver for time series
 - `PatchTST` - Patch-based Transformer
 
 ### ROCKET Family
 - `MiniRocket` - Fast random convolutional features
-- `MultiRocketPlus` - Multiple ROCKET kernels
-- `HydraPlus` - Hybrid ROCKET
 
 ### RNN Models
 - `RNNPlus` - LSTM/GRU with improvements
-- `RNNAttention` - RNN with attention
 
 ### Tabular Models
 - `TabTransformer` - Transformer for tabular data
-- `TabFusionTransformer` - Fusion of time series and tabular
 
 ## Data Formats
 
@@ -153,9 +152,11 @@ let transform = Compose::new()
 ```
 
 Available transforms include:
-- Noise: `GaussianNoise`, `MagAddNoise`, `MagMulNoise`
+- Noise: `GaussianNoise`
 - Warping: `TimeWarp`, `WindowWarp`, `MagWarp`
-- Masking: `CutOut`, `TimeStepOut`, `VarOut`
+- Masking: `CutOut`, `FrequencyMask`, `TimeMask`
+- Temporal: `HorizontalFlip`, `RandomShift`, `Rotation`, `Permutation`
+- SpecAugment: `SpecAugment`, `TSRandomShift`, `TSHorizontalFlip`, `TSVerticalFlip`
 - Mixing: `MixUp1d`, `CutMix1d`, `IntraClassCutMix1d`
 - Imaging: `TSToRP`, `TSToGASF`, `TSToGADF`, `TSToMTF`
 
@@ -183,8 +184,41 @@ tsai eval --checkpoint ./runs/best_model.safetensors
 See the `examples/` directory for more:
 
 - `ucr_inception_time.rs` - UCR classification with InceptionTimePlus
-- `forecasting_patchtst.rs` - Long-term forecasting with PatchTST
-- `multivariate_classification.rs` - Multivariate time series classification
+- `simple_classification.rs` - Basic classification example
+- `forecasting.rs` - Time series forecasting
+- `sklearn_api.rs` - sklearn-like API demonstration
+- `train_ucr_metal.rs` - GPU training with WGPU/Metal backend
+- `train_ucr_mlx.rs` - Apple MLX backend example
+- `compare_models.rs` - Model comparison on UCR datasets
+
+## Python Bindings
+
+Use tsai-rs from Python via the `tsai_rs` package:
+
+```bash
+# Build from source (requires Rust)
+cd crates/tsai_python
+pip install maturin
+maturin develop --release
+```
+
+```python
+import tsai_rs
+import numpy as np
+
+# Configure a model
+config = tsai_rs.InceptionTimePlusConfig(n_vars=1, seq_len=100, n_classes=5)
+
+# Compute confusion matrix
+preds = np.array([0, 1, 2, 0, 1])
+targets = np.array([0, 1, 1, 0, 2])
+cm = tsai_rs.confusion_matrix(preds, targets, n_classes=3)
+print(f"Accuracy: {cm.accuracy():.2%}")
+
+# Time series to image transforms
+series = np.sin(np.linspace(0, 4*np.pi, 50)).astype(np.float32)
+gasf_image = tsai_rs.compute_gasf(series)
+```
 
 ## Benchmarks
 

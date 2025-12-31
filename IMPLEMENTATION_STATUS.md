@@ -1,13 +1,14 @@
 # tsai-rs Implementation Status
 
-This document summarizes the implementation status of tsai-rs.
+This document summarizes the implementation status of tsai-rs v0.1.1.
 
 ## Completed (Phase 0-5 Core Structure)
 
 ### Workspace Structure ✅
-- Cargo workspace with 10 crates properly configured
+- Cargo workspace with 11 crates (10 in default workspace + tsai_python excluded)
 - All crates have proper Cargo.toml with dependencies
-- Feature flags for backend selection (ndarray, wgpu, tch)
+- Feature flags for backend selection (ndarray, wgpu, tch, mlx)
+- Python bindings via maturin (build separately: `cd crates/tsai_python && maturin develop`)
 
 ### tsai_core ✅
 - `Seed` - Deterministic RNG with derive/derive chain
@@ -27,8 +28,12 @@ This document summarizes the implementation status of tsai-rs.
 - I/O: `read_npy`, `read_npz`, `read_csv`, `read_parquet`
 
 ### tsai_transforms ✅
-- Augmentation transforms:
+- Augmentation transforms (17 transforms):
   - `GaussianNoise`, `TimeWarp`, `MagScale`, `CutOut`
+  - `MagWarp`, `WindowWarp` - Warping transforms
+  - `HorizontalFlip`, `RandomShift`, `Rotation`, `Permutation` - Temporal transforms
+  - `FrequencyMask`, `TimeMask`, `SpecAugment` - SpecAugment for audio
+  - `TSRandomShift`, `TSHorizontalFlip`, `TSVerticalFlip` - Additional temporal
   - `Compose` for chaining transforms
   - `Identity` transform
 - Label mixing:
@@ -38,37 +43,45 @@ This document summarizes the implementation status of tsai-rs.
   - `TSToGASF` / `TSToGADF` - Gramian Angular Fields
   - `TSToMTF` - Markov Transition Fields
 
-### tsai_models ✅ (Structure Complete)
+### tsai_models ✅ (16 Architectures)
 - CNN models:
   - `InceptionTimePlus` with config
   - `ResNetPlus` with config
   - `XCMPlus` with config
+  - `FCN` - Fully Convolutional Network
+  - `XceptionTimePlus` - Xception-inspired
+  - `OmniScaleCNN` - Multi-scale CNN
 - Transformer models:
   - `TSTPlus` (Time Series Transformer)
+  - `TSiTPlus` (Improved TS Transformer)
+  - `TSPerceiver` (Perceiver for time series)
   - `PatchTST` (Patch-based Transformer)
 - ROCKET family:
   - `MiniRocket` with feature extraction
 - RNN models:
-  - `RNNPlus` (LSTM-based)
+  - `RNNPlus` (LSTM/GRU-based)
 - Tabular models:
   - `TabTransformer`
 - `ModelRegistry` for dynamic model creation
+- Checkpointing with safetensors format
 
 ### tsai_train ✅
 - `Learner` - Training management
-- Callbacks:
-  - `ProgressCallback`
-  - `EarlyStoppingCallback`
-  - `CallbackList` for composition
-- Schedulers:
-  - `OneCycleLR`
-  - `CosineAnnealingLR`
-  - `StepLR`
-  - `ConstantLR`
-- Metrics:
-  - `Accuracy`, `MSE`, `MAE`, `F1Score`
-- Losses:
+- Callbacks (8):
+  - `ProgressCallback`, `EarlyStoppingCallback`
+  - `SaveModelCallback`, `GradientClipCallback`
+  - `HistoryCallback`, `MixedPrecisionCallback`
+  - `TerminateOnNanCallback`, `CallbackList`
+- Schedulers (9):
+  - `OneCycleLR`, `CosineAnnealingLR`, `CosineAnnealingWarmRestarts`
+  - `StepLR`, `ConstantLR`, `ExponentialLR`
+  - `PolynomialLR`, `LinearWarmup`, `ReduceLROnPlateau`
+- Metrics (9):
+  - `Accuracy`, `MSE`, `MAE`, `RMSE`
+  - `F1Score`, `Precision`, `Recall`, `AUC`, `MCC`
+- Losses (5):
   - `CrossEntropyLoss`, `MSELoss`, `HuberLoss`
+  - `FocalLoss`, `LabelSmoothingLoss`
 - Compatibility facades:
   - `TSClassifier`, `TSRegressor`, `TSForecaster`
 
@@ -139,7 +152,7 @@ This document summarizes the implementation status of tsai-rs.
 The Module derive issue has been resolved. Config structs are not stored in model structs - they're only used during initialization. For metadata fields that don't implement Module, the `#[module(skip)]` attribute is used (e.g., in MultiRocket and RNNAttention).
 
 ### ~~Incomplete Transform Implementations~~ ✅ RESOLVED
-All transforms (TimeWarp, CutOut, GaussianNoise, MagScale, MixUp, CutMix, etc.) are fully implemented with proper tensor operations. All 19 transform tests pass.
+All 17 augmentation transforms are fully implemented with proper tensor operations. Tests pass.
 
 ### ~~Training Loop~~ ✅ RESOLVED
 - **ClassificationTrainer**: Full autodiff integration with gradient computation, optimizer steps, early stopping, and validation
@@ -147,8 +160,8 @@ All transforms (TimeWarp, CutOut, GaussianNoise, MagScale, MixUp, CutMix, etc.) 
 - **Learner struct**: Complete with `fit_one_cycle`, `fit_with_early_stopping`, and `get_preds` methods
 - **compat.rs facades**:
   - TSClassifier: Fully implemented with InceptionTimePlus, OmniScaleCNN, and TSTPlus support
-  - TSRegressor: Fully implemented with MSE loss training and InceptionTimePlus, OmniScaleCNN, TSTPlus support
-  - TSForecaster: Fully implemented with MSE loss training and InceptionTimePlus, OmniScaleCNN, TSTPlus support
+  - TSRegressor: Fully implemented with MSE loss training
+  - TSForecaster: Fully implemented with MSE loss training
 
 ### ~~Dataset Fetching~~ ✅ RESOLVED
 UCR dataset downloading is fully implemented:
@@ -157,14 +170,19 @@ UCR dataset downloading is fully implemented:
 - Automatic caching in user cache directory
 - 158 UCR datasets supported
 
+### Python Bindings ✅ IMPLEMENTED
+- Python bindings available via `tsai_rs` package
+- Build separately due to polars/pyo3 linking conflict
+- Supports model configs, confusion matrix, TS-to-image transforms
+
 ## File Count Summary
 
-- 63 Rust source files (.rs)
-- 10 Cargo.toml files
-- 5 Markdown documentation files
+- 100+ Rust source files (.rs)
+- 11 Cargo.toml files (1 workspace + 10 crates)
+- 5+ Markdown documentation files
+- 11 example files
 - 1 GitHub Actions workflow
 - 1 License file
-- 1 gitignore file
 
 ## Architecture Diagram
 
@@ -172,17 +190,18 @@ UCR dataset downloading is fully implemented:
 tsai-rs/
 ├── Cargo.toml (workspace)
 ├── crates/
-│   ├── tsai_core/      # Core types, traits
-│   ├── tsai_data/      # Datasets, loaders, I/O
-│   ├── tsai_transforms/# Augmentations, imaging
-│   ├── tsai_models/    # Model zoo
-│   ├── tsai_train/     # Training loop, callbacks
-│   ├── tsai_analysis/  # Performance analysis
-│   ├── tsai_explain/   # Explainability
-│   ├── tsai_compute/   # Heterogeneous compute layer
-│   ├── tsai/           # Convenience re-exports
-│   └── tsai_cli/       # Command-line interface
-└── examples/           # Usage examples
+│   ├── tsai_core/       # Core types, traits
+│   ├── tsai_data/       # Datasets, loaders, I/O
+│   ├── tsai_transforms/ # Augmentations, imaging
+│   ├── tsai_models/     # Model zoo (16 architectures)
+│   ├── tsai_train/      # Training loop, callbacks
+│   ├── tsai_analysis/   # Performance analysis
+│   ├── tsai_explain/    # Explainability
+│   ├── tsai_compute/    # Heterogeneous compute layer
+│   ├── tsai/            # Convenience re-exports
+│   ├── tsai_cli/        # Command-line interface
+│   └── tsai_python/     # Python bindings (excluded from workspace)
+└── examples/            # Usage examples (11 files)
 ```
 
 ## Next Steps
@@ -194,9 +213,16 @@ tsai-rs/
 5. ~~Implement TSRegressor with RegressionTrainer and MSE loss~~ ✅
 6. ~~Implement TSForecaster with forecasting support~~ ✅
 7. ~~Add integration tests for training pipelines~~ ✅
-8. Add more unit tests
-9. ~~Add benchmark suite~~ ✅
-10. ~~Implement dataset downloading~~ ✅
+8. ~~Add benchmark suite~~ ✅
+9. ~~Implement dataset downloading~~ ✅
+10. ~~Add Python bindings~~ ✅
+
+### Remaining Work
+- Add ROCKET and MultiRocketPlus models
+- Add RandAugment transform
+- Add ShowGraph callback for training visualization
+- Add ONNX export support
+- Add UEA multivariate dataset support
 
 ## Integration Tests
 

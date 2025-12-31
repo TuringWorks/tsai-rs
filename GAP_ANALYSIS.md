@@ -1,8 +1,8 @@
 # tsai vs tsai-rs: Comprehensive Fit-Gap Analysis
 
-**Generated:** December 2024
+**Generated:** December 2025
 **tsai Version:** 0.4.1 (Python)
-**tsai-rs Version:** 0.1.0 (Rust)
+**tsai-rs Version:** 0.1.1 (Rust)
 
 ---
 
@@ -14,18 +14,19 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 10 architectures | **25%** |
-| **Augmentation Transforms** | 40+ transforms | 5 transforms | **12%** |
-| **Label Mixing** | 4 transforms | 3 (stubbed) | **25%** |
+| **Models** | 40+ architectures | 16 architectures | **40%** |
+| **Augmentation Transforms** | 40+ transforms | 17 transforms | **42%** |
+| **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
-| **Loss Functions** | 7+ custom losses | 3 losses | **43%** |
-| **Metrics** | 10+ metrics | 4 metrics | **40%** |
-| **Callbacks** | 10+ callbacks | 3 callbacks | **30%** |
+| **Loss Functions** | 7+ custom losses | 5 losses | **71%** |
+| **Metrics** | 10+ metrics | 9 metrics | **90%** |
+| **Callbacks** | 10+ callbacks | 8 callbacks | **80%** |
+| **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
 | **Data I/O** | Multiple formats | 4 formats | **80%** |
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~35%**
+**Overall Feature Parity: ~65%**
 
 ---
 
@@ -35,12 +36,12 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Model | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-------|---------------|----------------|--------|-------|
-| FCN | ✅ | ❌ | **GAP** | Fully Convolutional Network |
+| FCN | ✅ | ✅ | **FIT** | Fully Convolutional Network |
 | ResNet | ✅ | ✅ | **FIT** | ResNetPlus implemented |
 | ResCNN | ✅ | ❌ | **GAP** | 1D Residual CNN |
 | InceptionTime | ✅ | ✅ | **FIT** | InceptionTimePlus implemented |
-| XceptionTime | ✅ | ❌ | **GAP** | Xception adaptation |
-| OmniScaleCNN | ✅ | ❌ | **GAP** | Multi-scale 1D CNN |
+| XceptionTime | ✅ | ✅ | **FIT** | XceptionTimePlus implemented |
+| OmniScaleCNN | ✅ | ✅ | **FIT** | Multi-scale 1D CNN |
 | XCM | ✅ | ✅ | **FIT** | XCMPlus implemented |
 | TCN | ✅ | ❌ | **GAP** | Temporal Convolutional Network |
 | mWDN | ✅ | ❌ | **GAP** | Multi-level Wavelet Decomposition |
@@ -51,9 +52,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-------|---------------|----------------|--------|-------|
 | TransformerModel | ✅ | ❌ | **GAP** | Base Transformer |
 | TST/TSTPlus | ✅ | ✅ | **FIT** | Time Series Transformer |
-| TSiT/TSiTPlus | ✅ | ❌ | **GAP** | Vision Transformer adaptation |
+| TSiT/TSiTPlus | ✅ | ✅ | **FIT** | Vision Transformer adaptation |
 | PatchTST | ✅ | ✅ | **FIT** | ICLR 2023 model |
-| TSPerceiver | ✅ | ❌ | **GAP** | Perceiver IO adaptation |
+| TSPerceiver | ✅ | ✅ | **FIT** | Perceiver IO adaptation |
 | TSSequencerPlus | ✅ | ❌ | **GAP** | Sequencer adaptation |
 | TabTransformer | ✅ | ✅ | **FIT** | Tabular + TS Transformer |
 | GatedTabTransformer | ✅ | ❌ | **GAP** | Gated variant |
@@ -103,9 +104,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Model Gap Summary
 
-- **Implemented:** 10 models (InceptionTimePlus, ResNetPlus, XCMPlus, TSTPlus, PatchTST, MiniRocket, RNNPlus, TabTransformer, LSTM, GRU)
-- **Missing:** 30+ models
-- **Priority Gaps:** FCN, XceptionTime, OmniScaleCNN, RNN_FCN variants, Attention-based RNNs, ROCKET, MultiRocketPlus
+- **Implemented:** 16 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, MiniRocket, RNNPlus, TabTransformer, LSTM, GRU)
+- **Missing:** 25+ models
+- **Priority Gaps:** RNN_FCN variants, Attention-based RNNs, ROCKET, MultiRocketPlus, HydraPlus
 
 ---
 
@@ -133,9 +134,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
-| TSMagWarp | ✅ | ❌ | **GAP** | Magnitude warping |
-| TSTimeWarp | ✅ | ⚠️ | **PARTIAL** | Stubbed, needs spline impl |
-| TSWindowWarp | ✅ | ❌ | **GAP** | Window warping |
+| TSMagWarp | ✅ | ✅ | **FIT** | Magnitude warping |
+| TSTimeWarp | ✅ | ✅ | **FIT** | Time warping with linear interpolation |
+| TSWindowWarp | ✅ | ✅ | **FIT** | Window warping |
 | TSMagScale | ✅ | ✅ | **FIT** | Magnitude scaling |
 | TSMagScalePerVar | ✅ | ❌ | **GAP** | Per-variable scaling |
 | TSRandomTrend | ✅ | ❌ | **GAP** | Random trend |
@@ -144,10 +145,12 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
-| TSRandomShift | ✅ | ❌ | **GAP** | Random shifting |
-| TSHorizontalFlip | ✅ | ❌ | **GAP** | Time reversal |
-| TSVerticalFlip | ✅ | ❌ | **GAP** | Value negation |
+| TSRandomShift | ✅ | ✅ | **FIT** | Random shifting (RandomShift, TSRandomShift) |
+| TSHorizontalFlip | ✅ | ✅ | **FIT** | Time reversal (HorizontalFlip, TSHorizontalFlip) |
+| TSVerticalFlip | ✅ | ✅ | **FIT** | Value negation (TSVerticalFlip) |
 | TSTranslateX | ✅ | ❌ | **GAP** | X-axis translation |
+| Permutation | ✅ | ✅ | **FIT** | Segment permutation |
+| Rotation | ✅ | ✅ | **FIT** | Circular rotation |
 
 ### 2.5 Resampling & Resolution
 
@@ -174,12 +177,15 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
-| TSCutOut | ✅ | ⚠️ | **PARTIAL** | Stubbed, needs tensor ops |
+| TSCutOut | ✅ | ✅ | **FIT** | CutOut fully implemented |
 | TSTimeStepOut | ✅ | ❌ | **GAP** | Step dropout |
 | TSVarOut | ✅ | ❌ | **GAP** | Variable dropout |
 | TSMaskOut | ✅ | ❌ | **GAP** | Mask-based dropout |
 | TSInputDropout | ✅ | ❌ | **GAP** | Input dropout |
 | TSSelfDropout | ✅ | ❌ | **GAP** | Self-dropout |
+| FrequencyMask | ✅ | ✅ | **FIT** | SpecAugment frequency masking |
+| TimeMask | ✅ | ✅ | **FIT** | SpecAugment time masking |
+| SpecAugment | ✅ | ✅ | **FIT** | Combined freq+time masking |
 
 ### 2.8 Smoothing & Filtering
 
@@ -198,10 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 4 transforms (GaussianNoise, MagScale, Identity, Compose)
-- **Partial:** 2 transforms (TimeWarp, CutOut - need completion)
-- **Missing:** 35+ transforms
-- **Priority Gaps:** TimeWarp completion, MagWarp, WindowWarp, RandomResizedCrop, masking transforms, RandAugment
+- **Implemented:** 17 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose)
+- **Missing:** 25+ transforms
+- **Priority Gaps:** RandomResizedCrop, MagAddNoise, MagMulNoise, RandAugment
 
 ---
 
@@ -209,9 +214,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
-| MixUp1d | ✅ | ⚠️ | **PARTIAL** | Stubbed, needs tensor mixing |
-| CutMix1d | ✅ | ⚠️ | **PARTIAL** | Stubbed |
-| IntraClassCutMix1d | ✅ | ⚠️ | **PARTIAL** | Stubbed |
+| MixUp1d | ✅ | ✅ | **FIT** | Fully implemented |
+| CutMix1d | ✅ | ✅ | **FIT** | Fully implemented |
+| IntraClassCutMix1d | ✅ | ✅ | **FIT** | Fully implemented |
 | MixHandler1d | ✅ | ❌ | **GAP** | Base handler |
 
 ---
@@ -238,9 +243,10 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |------|---------------|----------------|--------|-------|
 | CrossEntropyLoss | ✅ | ✅ | **FIT** | Standard CE |
 | MSELoss | ✅ | ✅ | **FIT** | Mean Squared Error |
-| HuberLoss | ✅ | ⚠️ | **PARTIAL** | Simplified impl |
+| HuberLoss | ✅ | ✅ | **FIT** | Fully implemented |
+| FocalLoss | ✅ | ✅ | **FIT** | Class imbalance |
+| LabelSmoothingLoss | ✅ | ✅ | **FIT** | Label smoothing |
 | LogCoshLoss | ✅ | ❌ | **GAP** | Log-cosh loss |
-| FocalLoss | ✅ | ❌ | **GAP** | Class imbalance |
 | CenterLoss | ✅ | ❌ | **GAP** | Feature discrimination |
 | CenterPlusLoss | ✅ | ❌ | **GAP** | Combined center loss |
 | TweedieLoss | ✅ | ❌ | **GAP** | Probabilistic loss |
@@ -253,10 +259,12 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Accuracy | ✅ | ✅ | **FIT** | Classification accuracy |
 | MSE | ✅ | ✅ | **FIT** | Mean Squared Error |
 | MAE | ✅ | ✅ | **FIT** | Mean Absolute Error |
-| RMSE | ✅ | ❌ | **GAP** | Root MSE |
-| F1Score | ✅ | ⚠️ | **PARTIAL** | Uses accuracy proxy |
-| Precision | ✅ | ❌ | **GAP** | Per confusion matrix |
-| Recall | ✅ | ❌ | **GAP** | Per confusion matrix |
+| RMSE | ✅ | ✅ | **FIT** | Root MSE |
+| F1Score | ✅ | ✅ | **FIT** | Fully implemented |
+| Precision | ✅ | ✅ | **FIT** | Fully implemented |
+| Recall | ✅ | ✅ | **FIT** | Fully implemented |
+| AUC | ✅ | ✅ | **FIT** | Area Under Curve |
+| MCC | ✅ | ✅ | **FIT** | Matthews Correlation Coefficient |
 | MAPE | ✅ | ❌ | **GAP** | Mean Abs Percentage Error |
 
 ### 5.3 Schedulers
@@ -265,9 +273,13 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-----------|---------------|----------------|--------|-------|
 | OneCycleLR | ✅ | ✅ | **FIT** | Fully implemented |
 | CosineAnnealingLR | ✅ | ✅ | **FIT** | Implemented |
+| CosineAnnealingWarmRestarts | ✅ | ✅ | **FIT** | Implemented |
 | StepLR | ✅ | ✅ | **FIT** | Implemented |
-| ExponentialLR | ✅ | ❌ | **GAP** | Exponential decay |
-| ReduceLROnPlateau | ✅ | ❌ | **GAP** | Adaptive LR |
+| ConstantLR | ✅ | ✅ | **FIT** | Implemented |
+| ExponentialLR | ✅ | ✅ | **FIT** | Exponential decay |
+| PolynomialLR | ✅ | ✅ | **FIT** | Polynomial decay |
+| LinearWarmup | ✅ | ✅ | **FIT** | Linear warmup |
+| ReduceLROnPlateau | ✅ | ✅ | **FIT** | Adaptive LR |
 
 ### 5.4 Callbacks
 
@@ -275,7 +287,11 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |----------|---------------|----------------|--------|-------|
 | ProgressCallback | ✅ | ✅ | **FIT** | Progress reporting |
 | EarlyStopping | ✅ | ✅ | **FIT** | Early stopping |
-| SaveModel | ✅ | ❌ | **GAP** | Model checkpointing |
+| SaveModel | ✅ | ✅ | **FIT** | Model checkpointing |
+| GradientClip | ✅ | ✅ | **FIT** | Gradient clipping |
+| HistoryCallback | ✅ | ✅ | **FIT** | Training history |
+| MixedPrecision | ✅ | ✅ | **FIT** | Mixed precision training |
+| TerminateOnNan | ✅ | ✅ | **FIT** | NaN termination |
 | ShowGraph | ✅ | ❌ | **GAP** | Training visualization |
 | TransformScheduler | ✅ | ❌ | **GAP** | Transform scheduling |
 | WeightedPerSampleLoss | ✅ | ❌ | **GAP** | Sample weighting |
@@ -327,7 +343,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Feature | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |---------|---------------|----------------|--------|-------|
-| UCR datasets (128) | ✅ | ❌ | **GAP** | Auto-download |
+| UCR datasets (158) | ✅ | ✅ | **FIT** | Auto-download from timeseriesclassification.com |
 | UEA datasets (30) | ✅ | ❌ | **GAP** | Multivariate |
 | Regression datasets (15) | ✅ | ❌ | **GAP** | External data |
 | Forecasting datasets (62) | ✅ | ❌ | **GAP** | External data |
@@ -395,50 +411,44 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 ### High Priority (Core Functionality)
 
 1. **Models to Add:**
-   - FCN (foundational CNN)
-   - XceptionTime
-   - OmniScaleCNN
    - ROCKET (original algorithm)
+   - MultiRocketPlus
+   - HydraPlus
    - RNN_FCN variants
    - Attention-based RNNs (LSTMAttention, GRUAttention)
 
-2. **Transforms to Complete:**
-   - TimeWarp (complete spline interpolation)
-   - CutOut (complete tensor operations)
-   - MixUp1d, CutMix1d (complete implementations)
-   - MagWarp, WindowWarp
+2. **Transforms to Add:**
+   - RandAugment
+   - TSRandomResizedCrop
+   - MagAddNoise, MagMulNoise
+   - Masking transforms (TSMaskOut, TSVarOut)
 
 3. **Training Infrastructure:**
-   - Complete HuberLoss implementation
-   - Proper F1Score metric
-   - SaveModel callback
-   - Model checkpointing and loading
+   - ShowGraph callback
+   - TransformScheduler callback
 
 ### Medium Priority (Enhanced Functionality)
 
 4. **Models:**
-   - TSiT/TSiTPlus
-   - TSPerceiver
-   - MultiRocketPlus
-   - HydraPlus
    - gMLP
+   - TabFusionTransformer
+   - GatedTabTransformer
+   - ConvTranPlus
 
 5. **Transforms:**
-   - RandAugment
-   - TSRandomResizedCrop
-   - Masking transforms (TSMaskOut, TSVarOut)
    - Smoothing/filtering transforms
+   - TSRandomCropPad
+   - TSRandomZoomOut
 
 6. **Training:**
-   - FocalLoss
    - MaskedLossWrapper
    - WeightedPerSampleLoss
-   - ShowGraph callback
+   - LogCoshLoss
 
 ### Low Priority (Advanced Features)
 
 7. **Data:**
-   - UCR/UEA dataset auto-download
+   - UEA dataset auto-download
    - SlidingWindow
    - Walk-forward cross-validation
 
@@ -491,25 +501,27 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ## 12. Conclusion
 
-tsai-rs provides a solid foundation with approximately **35% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, basic models, training loop) is well-implemented. The main gaps are:
+tsai-rs provides a solid foundation with approximately **65% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
-1. **Model diversity** - Only 10 of 40+ models implemented
-2. **Augmentation transforms** - Only 5 of 40+ transforms implemented
-3. **Training utilities** - Missing advanced losses, callbacks, and checkpointing
+1. **Model diversity** - 16 of 40+ models implemented (~40%)
+2. **Augmentation transforms** - 17 of 40+ transforms implemented (~42%)
+3. **Advanced features** - Missing some specialized callbacks and losses
 
 The Rust implementation benefits from:
 - Type safety and memory safety
 - Potential for better performance
 - Clean architecture with proper abstractions
-- Good backend flexibility via Burn
+- Good backend flexibility via Burn (ndarray, WGPU, MLX, PyTorch)
+- Python bindings via `tsai_rs` package
+- 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Complete partial implementations (TimeWarp, MixUp, etc.)
-2. Add model checkpointing
-3. Implement FCN and XceptionTime models
-4. Add RandAugment for automatic augmentation
-5. Complete metrics (F1, RMSE)
+1. Add ROCKET and MultiRocketPlus models
+2. Implement RandAugment for automatic augmentation
+3. Add more noise transforms (MagAddNoise, MagMulNoise)
+4. Implement ShowGraph callback for training visualization
+5. Add ONNX export support
 
 ---
 
-*This analysis was generated by comparing tsai v0.4.1 documentation and source with tsai-rs v0.1.0 implementation.*
+*This analysis was generated by comparing tsai v0.4.1 documentation and source with tsai-rs v0.1.1 implementation.*

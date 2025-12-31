@@ -60,8 +60,6 @@ safetensors = "0.4"
 # Data formats
 ndarray = { version = "0.16", features = ["serde"] }
 ndarray-npy = "0.9"
-polars = { version = "0.44", features = ["parquet", "csv", "lazy"] }
-arrow = "53"
 
 # Error handling
 thiserror = "2.0"

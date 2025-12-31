@@ -17,14 +17,13 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 # Internal crates (using path dependencies)
-# Note: We disable polars-io to avoid linking conflicts with pyo3
-tsai_core = { path = "../tsai_core", default-features = false, features = ["backend-ndarray"] }
-tsai_data = { path = "../tsai_data", default-features = false, features = ["backend-ndarray"] }
-tsai_models = { path = "../tsai_models", default-features = false, features = ["backend-ndarray"] }
-tsai_train = { path = "../tsai_train", default-features = false, features = ["backend-ndarray"] }
-tsai_transforms = { path = "../tsai_transforms", default-features = false }
-tsai_analysis = { path = "../tsai_analysis", default-features = false }
-tsai_explain = { path = "../tsai_explain", default-features = false }
+tsai_core = { path = "../tsai_core" }
+tsai_data = { path = "../tsai_data" }
+tsai_models = { path = "../tsai_models" }
+tsai_train = { path = "../tsai_train" }
+tsai_transforms = { path = "../tsai_transforms" }
+tsai_analysis = { path = "../tsai_analysis" }
+tsai_explain = { path = "../tsai_explain" }
 
 # PyO3 and numpy
 pyo3 = { version = "0.22", features = ["extension-module"] }

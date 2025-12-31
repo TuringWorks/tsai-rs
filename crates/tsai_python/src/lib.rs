@@ -1,50 +1,25 @@
 //! Python bindings for tsai-rs.
 //!
 //! This module provides PyO3 bindings to expose tsai-rs functionality to Python.
-//!
-//! # Usage from Python
-//!
-//! ```python
-//! import tsai_rs
-//!
-//! # List available UCR datasets
-//! datasets = tsai_rs.get_UCR_univariate_list()
-//!
-//! # Load a UCR dataset
-//! X_train, y_train, X_test, y_test = tsai_rs.get_UCR_data("NATOPS", return_split=True)
-//!
-//! # Create model config
-//! config = tsai_rs.InceptionTimePlusConfig(n_vars=24, seq_len=51, n_classes=6)
-//!
-//! # Compute confusion matrix
-//! cm = tsai_rs.confusion_matrix(preds, targets, n_classes=6)
-//! print(f"Accuracy: {cm.accuracy()}")
-//! ```
 
-use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
+use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray3, ToPyArray};
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyValueError, PyRuntimeError};
+use tsai_train::Scheduler;
 
 // ============================================================================
 // Data loading and UCR datasets
 // ============================================================================
 
 /// Get list of available UCR univariate datasets.
-///
-/// Returns:
-///     List of dataset names (128 univariate datasets)
 #[pyfunction]
 fn get_UCR_univariate_list() -> Vec<&'static str> {
     tsai_data::ucr::list_datasets().to_vec()
 }
 
 /// Get list of available UCR multivariate datasets.
-///
-/// Returns:
-///     List of dataset names (30 multivariate datasets)
 #[pyfunction]
 fn get_UCR_multivariate_list() -> Vec<&'static str> {
-    // Subset of multivariate datasets from UCR archive
     vec![
         "ArticularyWordRecognition", "AtrialFibrillation", "BasicMotions",
         "CharacterTrajectories", "Cricket", "DuckDuckGeese", "EigenWorms",
@@ -58,15 +33,6 @@ fn get_UCR_multivariate_list() -> Vec<&'static str> {
 }
 
 /// Load a UCR dataset.
-///
-/// Args:
-///     dsid: Dataset ID/name (e.g., "NATOPS", "ECG200")
-///     return_split: If True, return separate train/test arrays.
-///                   If False, return combined X, y with splits indices.
-///
-/// Returns:
-///     If return_split=True: (X_train, y_train, X_test, y_test) as numpy arrays
-///     If return_split=False: (X, y, splits) where splits is (train_indices, test_indices)
 #[pyfunction]
 #[pyo3(signature = (dsid, return_split=true))]
 fn get_UCR_data<'py>(
@@ -74,81 +40,76 @@ fn get_UCR_data<'py>(
     dsid: &str,
     return_split: bool,
 ) -> PyResult<PyObject> {
-    // Load the dataset
     let dataset = tsai_data::ucr::UCRDataset::load(dsid, None)
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to load dataset '{}': {}", dsid, e)))?;
 
-    // Get data from train and test sets
     let train_x = dataset.train.x().clone();
     let train_y = dataset.train.y().cloned();
     let test_x = dataset.test.x().clone();
     let test_y = dataset.test.y().cloned();
 
     if return_split {
-        // Return (X_train, y_train, X_test, y_test)
-        let x_train = PyArray3::from_owned_array(py, train_x);
-        let y_train = train_y.map(|y| {
-            let y_1d: Vec<f32> = y.iter().cloned().collect();
-            PyArray1::from_vec(py, y_1d)
-        });
-        let x_test = PyArray3::from_owned_array(py, test_x);
-        let y_test = test_y.map(|y| {
-            let y_1d: Vec<f32> = y.iter().cloned().collect();
-            PyArray1::from_vec(py, y_1d)
-        });
+        let x_train = train_x.to_pyarray_bound(py);
+        let y_train = match train_y {
+            Some(y) => {
+                let y_1d: Vec<f32> = y.iter().cloned().collect();
+                ndarray::Array1::from_vec(y_1d).to_pyarray_bound(py)
+            },
+            None => ndarray::Array1::<f32>::zeros(0).to_pyarray_bound(py),
+        };
+        let x_test = test_x.to_pyarray_bound(py);
+        let y_test = match test_y {
+            Some(y) => {
+                let y_1d: Vec<f32> = y.iter().cloned().collect();
+                ndarray::Array1::from_vec(y_1d).to_pyarray_bound(py)
+            },
+            None => ndarray::Array1::<f32>::zeros(0).to_pyarray_bound(py),
+        };
 
-        let result = (
-            x_train,
-            y_train.unwrap_or_else(|| PyArray1::from_vec(py, vec![])),
-            x_test,
-            y_test.unwrap_or_else(|| PyArray1::from_vec(py, vec![])),
-        );
-        Ok(result.into_pyobject(py)?.into_any().unbind())
+        let result = pyo3::types::PyTuple::new_bound(py, [
+            x_train.into_any(),
+            y_train.into_any(),
+            x_test.into_any(),
+            y_test.into_any(),
+        ]);
+        Ok(result.into())
     } else {
-        // Combine and return (X, y, splits)
         let n_train = train_x.shape()[0];
         let n_test = test_x.shape()[0];
 
-        // Concatenate X arrays
         let combined_x = ndarray::concatenate(
             ndarray::Axis(0),
             &[train_x.view(), test_x.view()]
         ).map_err(|e| PyRuntimeError::new_err(format!("Failed to concatenate: {}", e)))?;
 
-        let x_arr = PyArray3::from_owned_array(py, combined_x);
+        let x_arr = combined_x.to_pyarray_bound(py);
 
-        // Concatenate y arrays if present
         let y_arr = if let (Some(ty), Some(tey)) = (train_y, test_y) {
             let ty_1d: Vec<f32> = ty.iter().cloned().collect();
             let tey_1d: Vec<f32> = tey.iter().cloned().collect();
             let mut combined_y = ty_1d;
             combined_y.extend(tey_1d);
-            PyArray1::from_vec(py, combined_y)
+            ndarray::Array1::from_vec(combined_y).to_pyarray_bound(py)
         } else {
-            PyArray1::from_vec(py, vec![])
+            ndarray::Array1::<f32>::zeros(0).to_pyarray_bound(py)
         };
 
-        // Create splits (train indices, test indices)
         let train_indices: Vec<i64> = (0..n_train as i64).collect();
         let test_indices: Vec<i64> = (n_train as i64..(n_train + n_test) as i64).collect();
-        let splits = (
-            PyArray1::from_vec(py, train_indices),
-            PyArray1::from_vec(py, test_indices),
-        );
+        let train_arr = ndarray::Array1::from_vec(train_indices).to_pyarray_bound(py);
+        let test_arr = ndarray::Array1::from_vec(test_indices).to_pyarray_bound(py);
+        let splits = pyo3::types::PyTuple::new_bound(py, [train_arr.into_any(), test_arr.into_any()]);
 
-        let result = (x_arr, y_arr, splits);
-        Ok(result.into_pyobject(py)?.into_any().unbind())
+        let result = pyo3::types::PyTuple::new_bound(py, [
+            x_arr.into_any(),
+            y_arr.into_any(),
+            splits.into_any(),
+        ]);
+        Ok(result.into())
     }
 }
 
 /// Combine split data arrays into X, y and splits.
-///
-/// Args:
-///     X_list: List of X arrays [X_train, X_test] or [X_train, X_valid, X_test]
-///     y_list: List of y arrays [y_train, y_test] or [y_train, y_valid, y_test]
-///
-/// Returns:
-///     (X, y, splits) where splits contains indices for each split
 #[pyfunction]
 fn combine_split_data<'py>(
     py: Python<'py>,
@@ -162,7 +123,6 @@ fn combine_split_data<'py>(
         return Err(PyValueError::new_err("X_list and y_list must have same length"));
     }
 
-    // Collect sizes and build indices
     let mut sizes = Vec::new();
     let mut all_x_data = Vec::new();
     let mut all_y_data = Vec::new();
@@ -172,14 +132,12 @@ fn combine_split_data<'py>(
         let y_arr = y.as_array();
         sizes.push(x_arr.shape()[0]);
 
-        // Flatten x into vec
         for sample in x_arr.outer_iter() {
             all_x_data.push(sample.to_owned());
         }
         all_y_data.extend(y_arr.iter().cloned());
     }
 
-    // Build combined X
     let n_total = sizes.iter().sum();
     let n_vars = x_list[0].as_array().shape()[1];
     let seq_len = x_list[0].as_array().shape()[2];
@@ -191,33 +149,27 @@ fn combine_split_data<'py>(
         idx += 1;
     }
 
-    let x_arr = PyArray3::from_owned_array(py, combined_x);
-    let y_arr = PyArray1::from_vec(py, all_y_data);
+    let x_arr = combined_x.to_pyarray_bound(py);
+    let y_arr = ndarray::Array1::from_vec(all_y_data).to_pyarray_bound(py);
 
-    // Build splits
     let mut splits = Vec::new();
     let mut start = 0i64;
     for size in &sizes {
         let indices: Vec<i64> = (start..start + *size as i64).collect();
-        splits.push(PyArray1::from_vec(py, indices));
+        splits.push(ndarray::Array1::from_vec(indices).to_pyarray_bound(py));
         start += *size as i64;
     }
 
-    let splits_tuple = pyo3::types::PyTuple::new(py, splits)?;
-    let result = (x_arr, y_arr, splits_tuple);
-    Ok(result.into_pyobject(py)?.into_any().unbind())
+    let splits_tuple = pyo3::types::PyTuple::new_bound(py, splits);
+    let result = pyo3::types::PyTuple::new_bound(py, [
+        x_arr.into_any(),
+        y_arr.into_any(),
+        splits_tuple.into_any(),
+    ]);
+    Ok(result.into())
 }
 
 /// Create train/test split indices.
-///
-/// Args:
-///     n_samples: Total number of samples
-///     test_size: Proportion of samples for test set (0-1)
-///     shuffle: Whether to shuffle before splitting
-///     seed: Random seed for reproducibility
-///
-/// Returns:
-///     Tuple of (train_indices, test_indices)
 #[pyfunction]
 #[pyo3(signature = (n_samples, test_size=0.2, shuffle=true, seed=None))]
 fn train_test_split_indices<'py>(
@@ -248,8 +200,8 @@ fn train_test_split_indices<'py>(
     let test_indices: Vec<i64> = indices[n_train..].iter().map(|&x| x as i64).collect();
 
     (
-        PyArray1::from_vec(py, train_indices),
-        PyArray1::from_vec(py, test_indices),
+        ndarray::Array1::from_vec(train_indices).to_pyarray_bound(py),
+        ndarray::Array1::from_vec(test_indices).to_pyarray_bound(py),
     )
 }
 
@@ -257,7 +209,6 @@ fn train_test_split_indices<'py>(
 // Dataset wrapper
 // ============================================================================
 
-/// Time series dataset.
 #[pyclass]
 pub struct TSDataset {
     x: ndarray::Array3<f32>,
@@ -266,7 +217,6 @@ pub struct TSDataset {
 
 #[pymethods]
 impl TSDataset {
-    /// Create a new dataset from numpy arrays.
     #[new]
     #[pyo3(signature = (x, y=None))]
     fn new(
@@ -279,45 +229,37 @@ impl TSDataset {
         }
     }
 
-    /// Get number of samples.
     fn __len__(&self) -> usize {
         self.x.shape()[0]
     }
 
-    /// Get shape as (samples, variables, length).
     #[getter]
     fn shape(&self) -> (usize, usize, usize) {
         let s = self.x.shape();
         (s[0], s[1], s[2])
     }
 
-    /// Get number of variables/channels.
     #[getter]
     fn n_vars(&self) -> usize {
         self.x.shape()[1]
     }
 
-    /// Get sequence length.
     #[getter]
     fn seq_len(&self) -> usize {
         self.x.shape()[2]
     }
 
-    /// Get X data as numpy array.
     fn get_x<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray3<f32>> {
-        PyArray3::from_owned_array(py, self.x.clone())
+        self.x.to_pyarray_bound(py)
     }
 
-    /// Get y data as numpy array.
     fn get_y<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f32>>> {
-        self.y.clone().map(|y| PyArray1::from_owned_array(py, y))
+        self.y.clone().map(|y| y.to_pyarray_bound(py))
     }
 
-    /// Get a subset of the dataset by indices.
     fn subset(&self, indices: PyReadonlyArray1<i64>) -> PyResult<Self> {
         let indices: Vec<usize> = indices.as_array().iter().map(|&i| i as usize).collect();
 
-        // Validate indices
         let n = self.x.shape()[0];
         for &i in &indices {
             if i >= n {
@@ -325,7 +267,6 @@ impl TSDataset {
             }
         }
 
-        // Build subset
         let n_vars = self.x.shape()[1];
         let seq_len = self.x.shape()[2];
         let mut new_x = ndarray::Array3::<f32>::zeros((indices.len(), n_vars, seq_len));
@@ -353,7 +294,6 @@ impl TSDataset {
 // Model configuration bindings
 // ============================================================================
 
-/// Configuration for InceptionTimePlus model.
 #[pyclass]
 #[derive(Clone)]
 pub struct InceptionTimePlusConfig {
@@ -401,14 +341,12 @@ impl InceptionTimePlusConfig {
     #[getter] fn n_blocks(&self) -> usize { self.inner.n_blocks }
     #[getter] fn n_filters(&self) -> usize { self.inner.n_filters }
 
-    /// Convert to JSON string.
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string_pretty(&self.inner)
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 }
 
-/// Configuration for ResNetPlus model.
 #[pyclass]
 #[derive(Clone)]
 pub struct ResNetPlusConfig {
@@ -432,9 +370,8 @@ impl ResNetPlusConfig {
                 seq_len,
                 n_classes,
                 n_blocks,
-                n_filters,
+                n_filters: vec![n_filters; n_blocks],
                 kernel_size: 8,
-                dropout: 0.0,
             },
         }
     }
@@ -451,7 +388,6 @@ impl ResNetPlusConfig {
     #[getter] fn n_classes(&self) -> usize { self.inner.n_classes }
 }
 
-/// Configuration for PatchTST model.
 #[pyclass]
 #[derive(Clone)]
 pub struct PatchTSTConfig {
@@ -460,7 +396,6 @@ pub struct PatchTSTConfig {
 
 #[pymethods]
 impl PatchTSTConfig {
-    /// Create a config for classification.
     #[staticmethod]
     fn for_classification(n_vars: usize, seq_len: usize, n_classes: usize) -> Self {
         Self {
@@ -468,7 +403,6 @@ impl PatchTSTConfig {
         }
     }
 
-    /// Create a config for forecasting.
     #[staticmethod]
     fn for_forecasting(n_vars: usize, seq_len: usize, horizon: usize) -> Self {
         Self {
@@ -500,7 +434,6 @@ impl PatchTSTConfig {
     }
 }
 
-/// Configuration for TSTPlus (Time Series Transformer) model.
 #[pyclass]
 #[derive(Clone)]
 pub struct TSTConfig {
@@ -524,33 +457,32 @@ impl TSTConfig {
             inner: tsai_models::TSTConfig {
                 n_vars,
                 seq_len,
-                n_outputs: n_classes,
+                n_classes,
                 d_model,
                 n_heads,
                 n_layers,
                 d_ff: d_model * 4,
                 dropout,
-                pe: tsai_models::PositionalEncodingType::Learnable,
+                use_pe: true,
             },
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "TSTConfig(n_vars={}, seq_len={}, n_outputs={}, d_model={})",
-            self.inner.n_vars, self.inner.seq_len, self.inner.n_outputs, self.inner.d_model
+            "TSTConfig(n_vars={}, seq_len={}, n_classes={}, d_model={})",
+            self.inner.n_vars, self.inner.seq_len, self.inner.n_classes, self.inner.d_model
         )
     }
 
     #[getter] fn n_vars(&self) -> usize { self.inner.n_vars }
     #[getter] fn seq_len(&self) -> usize { self.inner.seq_len }
-    #[getter] fn n_outputs(&self) -> usize { self.inner.n_outputs }
+    #[getter] fn n_classes(&self) -> usize { self.inner.n_classes }
     #[getter] fn d_model(&self) -> usize { self.inner.d_model }
     #[getter] fn n_heads(&self) -> usize { self.inner.n_heads }
     #[getter] fn n_layers(&self) -> usize { self.inner.n_layers }
 }
 
-/// Configuration for RNNPlus model.
 #[pyclass]
 #[derive(Clone)]
 pub struct RNNPlusConfig {
@@ -560,12 +492,12 @@ pub struct RNNPlusConfig {
 #[pymethods]
 impl RNNPlusConfig {
     #[new]
-    #[pyo3(signature = (n_vars, seq_len, n_outputs, hidden_dim=128, n_layers=2, rnn_type="lstm", bidirectional=true, dropout=0.1))]
+    #[pyo3(signature = (n_vars, seq_len, n_classes, hidden_size=128, n_layers=2, rnn_type="lstm", bidirectional=true, dropout=0.1))]
     fn new(
         n_vars: usize,
         seq_len: usize,
-        n_outputs: usize,
-        hidden_dim: usize,
+        n_classes: usize,
+        hidden_size: usize,
         n_layers: usize,
         rnn_type: &str,
         bidirectional: bool,
@@ -581,8 +513,8 @@ impl RNNPlusConfig {
             inner: tsai_models::RNNPlusConfig {
                 n_vars,
                 seq_len,
-                n_outputs,
-                hidden_dim,
+                n_classes,
+                hidden_size,
                 n_layers,
                 rnn_type,
                 bidirectional,
@@ -593,18 +525,17 @@ impl RNNPlusConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "RNNPlusConfig(n_vars={}, seq_len={}, n_outputs={}, hidden_dim={})",
-            self.inner.n_vars, self.inner.seq_len, self.inner.n_outputs, self.inner.hidden_dim
+            "RNNPlusConfig(n_vars={}, seq_len={}, n_classes={}, hidden_size={})",
+            self.inner.n_vars, self.inner.seq_len, self.inner.n_classes, self.inner.hidden_size
         )
     }
 
     #[getter] fn n_vars(&self) -> usize { self.inner.n_vars }
     #[getter] fn seq_len(&self) -> usize { self.inner.seq_len }
-    #[getter] fn n_outputs(&self) -> usize { self.inner.n_outputs }
-    #[getter] fn hidden_dim(&self) -> usize { self.inner.hidden_dim }
+    #[getter] fn n_classes(&self) -> usize { self.inner.n_classes }
+    #[getter] fn hidden_size(&self) -> usize { self.inner.hidden_size }
 }
 
-/// Configuration for MiniRocket model.
 #[pyclass]
 #[derive(Clone)]
 pub struct MiniRocketConfig {
@@ -614,41 +545,42 @@ pub struct MiniRocketConfig {
 #[pymethods]
 impl MiniRocketConfig {
     #[new]
-    #[pyo3(signature = (n_vars, seq_len, n_classes, n_kernels=10000))]
+    #[pyo3(signature = (n_vars, seq_len, n_classes, n_features=10000, seed=42))]
     fn new(
         n_vars: usize,
         seq_len: usize,
         n_classes: usize,
-        n_kernels: usize,
+        n_features: usize,
+        seed: u64,
     ) -> Self {
         Self {
             inner: tsai_models::MiniRocketConfig {
                 n_vars,
                 seq_len,
                 n_classes,
-                n_kernels,
+                n_features,
+                seed,
             },
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "MiniRocketConfig(n_vars={}, seq_len={}, n_classes={}, n_kernels={})",
-            self.inner.n_vars, self.inner.seq_len, self.inner.n_classes, self.inner.n_kernels
+            "MiniRocketConfig(n_vars={}, seq_len={}, n_classes={}, n_features={})",
+            self.inner.n_vars, self.inner.seq_len, self.inner.n_classes, self.inner.n_features
         )
     }
 
     #[getter] fn n_vars(&self) -> usize { self.inner.n_vars }
     #[getter] fn seq_len(&self) -> usize { self.inner.seq_len }
     #[getter] fn n_classes(&self) -> usize { self.inner.n_classes }
-    #[getter] fn n_kernels(&self) -> usize { self.inner.n_kernels }
+    #[getter] fn n_features(&self) -> usize { self.inner.n_features }
 }
 
 // ============================================================================
 // Training configuration bindings
 // ============================================================================
 
-/// Training configuration.
 #[pyclass]
 #[derive(Clone)]
 pub struct LearnerConfig {
@@ -683,11 +615,6 @@ impl LearnerConfig {
     #[getter] fn mixed_precision(&self) -> bool { self.inner.mixed_precision }
 }
 
-// ============================================================================
-// Learning rate scheduler bindings
-// ============================================================================
-
-/// One-cycle learning rate scheduler.
 #[pyclass]
 pub struct OneCycleLR {
     inner: tsai_train::OneCycleLR,
@@ -695,7 +622,6 @@ pub struct OneCycleLR {
 
 #[pymethods]
 impl OneCycleLR {
-    /// Create a simple one-cycle scheduler.
     #[staticmethod]
     fn simple(max_lr: f64, total_steps: usize) -> Self {
         Self {
@@ -703,15 +629,13 @@ impl OneCycleLR {
         }
     }
 
-    /// Get learning rate at a given step.
     fn get_lr(&self, step: usize) -> f64 {
         self.inner.get_lr(step)
     }
 
-    /// Get learning rates for a range of steps.
     fn get_lr_schedule<'py>(&self, py: Python<'py>, n_steps: usize) -> Bound<'py, PyArray1<f64>> {
         let lrs: Vec<f64> = (0..n_steps).map(|s| self.inner.get_lr(s)).collect();
-        PyArray1::from_vec(py, lrs)
+        ndarray::Array1::from_vec(lrs).to_pyarray_bound(py)
     }
 
     fn __repr__(&self) -> String {
@@ -723,7 +647,6 @@ impl OneCycleLR {
 // Analysis bindings
 // ============================================================================
 
-/// Confusion matrix for classification.
 #[pyclass]
 pub struct ConfusionMatrix {
     inner: tsai_analysis::ConfusionMatrix,
@@ -731,25 +654,22 @@ pub struct ConfusionMatrix {
 
 #[pymethods]
 impl ConfusionMatrix {
-    /// Compute accuracy.
-    fn accuracy(&self) -> f64 { self.inner.accuracy() }
+    fn accuracy(&self) -> f64 { self.inner.accuracy() as f64 }
+    fn macro_f1(&self) -> f64 { self.inner.macro_f1() as f64 }
+    fn precision(&self, class: usize) -> f64 { self.inner.precision(class) as f64 }
+    fn recall(&self, class: usize) -> f64 { self.inner.recall(class) as f64 }
+    fn f1(&self, class: usize) -> f64 { self.inner.f1(class) as f64 }
 
-    /// Compute macro-averaged F1 score.
-    fn macro_f1(&self) -> f64 { self.inner.macro_f1() }
-
-    /// Compute precision for a specific class.
-    fn precision(&self, class: usize) -> f64 { self.inner.precision(class) }
-
-    /// Compute recall for a specific class.
-    fn recall(&self, class: usize) -> f64 { self.inner.recall(class) }
-
-    /// Compute F1 score for a specific class.
-    fn f1(&self, class: usize) -> f64 { self.inner.f1(class) }
-
-    /// Get the confusion matrix as a 2D array.
     fn matrix<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<usize>> {
-        let mat = self.inner.matrix();
-        PyArray2::from_owned_array(py, mat)
+        let mat = &self.inner.matrix;
+        let n_classes = self.inner.n_classes;
+        let mut arr = ndarray::Array2::<usize>::zeros((n_classes, n_classes));
+        for (i, row) in mat.iter().enumerate() {
+            for (j, &val) in row.iter().enumerate() {
+                arr[[i, j]] = val;
+            }
+        }
+        arr.to_pyarray_bound(py)
     }
 
     fn __repr__(&self) -> String {
@@ -760,7 +680,6 @@ impl ConfusionMatrix {
     }
 }
 
-/// Compute confusion matrix from predictions and targets.
 #[pyfunction]
 fn confusion_matrix(
     preds: PyReadonlyArray1<i64>,
@@ -774,7 +693,6 @@ fn confusion_matrix(
     ConfusionMatrix { inner: cm }
 }
 
-/// A record of a top loss sample.
 #[pyclass]
 #[derive(Clone)]
 pub struct TopLoss {
@@ -795,7 +713,6 @@ impl TopLoss {
     }
 }
 
-/// Find the top K samples with highest losses.
 #[pyfunction]
 fn top_losses(
     losses: PyReadonlyArray1<f32>,
@@ -826,7 +743,6 @@ fn top_losses(
 // Transform bindings
 // ============================================================================
 
-/// Compute Gramian Angular Summation Field (GASF) for a time series.
 #[pyfunction]
 #[pyo3(signature = (series, size=None))]
 fn compute_gasf<'py>(
@@ -849,10 +765,9 @@ fn compute_gasf<'py>(
         }
     }
 
-    PyArray2::from_owned_array(py, array)
+    array.to_pyarray_bound(py)
 }
 
-/// Compute Gramian Angular Difference Field (GADF) for a time series.
 #[pyfunction]
 #[pyo3(signature = (series, size=None))]
 fn compute_gadf<'py>(
@@ -875,23 +790,20 @@ fn compute_gadf<'py>(
         }
     }
 
-    PyArray2::from_owned_array(py, array)
+    array.to_pyarray_bound(py)
 }
 
-/// Compute Recurrence Plot for a time series.
 #[pyfunction]
-#[pyo3(signature = (series, threshold=0.1))]
+#[pyo3(signature = (series, _threshold=0.1))]
 fn compute_recurrence_plot<'py>(
     py: Python<'py>,
     series: PyReadonlyArray1<f32>,
-    threshold: f32,
+    _threshold: f32,
 ) -> Bound<'py, PyArray2<f32>> {
     let series_vec: Vec<f32> = series.as_array().to_vec();
     let size = series_vec.len();
 
-    let rp = tsai_transforms::TSToRP::new(
-        tsai_transforms::RecurrencePlotConfig::new(size, threshold),
-    );
+    let rp = tsai_transforms::TSToRP::new(size);
     let result = rp.compute(&series_vec);
 
     let rows = result.len();
@@ -903,10 +815,9 @@ fn compute_recurrence_plot<'py>(
         }
     }
 
-    PyArray2::from_owned_array(py, array)
+    array.to_pyarray_bound(py)
 }
 
-/// Standardize time series data (zero mean, unit variance).
 #[pyfunction]
 #[pyo3(signature = (x, by_sample=true))]
 fn ts_standardize<'py>(
@@ -920,7 +831,6 @@ fn ts_standardize<'py>(
     let mut result = ndarray::Array3::<f32>::zeros((n_samples, n_vars, seq_len));
 
     if by_sample {
-        // Standardize each sample independently
         for i in 0..n_samples {
             let sample = x_arr.slice(ndarray::s![i, .., ..]);
             let mean = sample.mean().unwrap_or(0.0);
@@ -934,7 +844,6 @@ fn ts_standardize<'py>(
             }
         }
     } else {
-        // Standardize across all samples
         let mean = x_arr.mean().unwrap_or(0.0);
         let std = x_arr.std(0.0);
         let std = if std < 1e-8 { 1.0 } else { std };
@@ -948,14 +857,9 @@ fn ts_standardize<'py>(
         }
     }
 
-    PyArray3::from_owned_array(py, result)
+    result.to_pyarray_bound(py)
 }
 
-// ============================================================================
-// Data augmentation transforms
-// ============================================================================
-
-/// Apply Gaussian noise augmentation to time series.
 #[pyfunction]
 #[pyo3(signature = (x, std=0.1, seed=None))]
 fn add_gaussian_noise<'py>(
@@ -981,10 +885,9 @@ fn add_gaussian_noise<'py>(
         *val += noise * std;
     }
 
-    PyArray3::from_owned_array(py, result)
+    result.to_pyarray_bound(py)
 }
 
-/// Apply magnitude scaling augmentation.
 #[pyfunction]
 #[pyo3(signature = (x, scale_range=(0.8, 1.2), seed=None))]
 fn mag_scale<'py>(
@@ -1015,49 +918,38 @@ fn mag_scale<'py>(
         }
     }
 
-    PyArray3::from_owned_array(py, result)
+    result.to_pyarray_bound(py)
 }
 
 // ============================================================================
 // Utility functions
 // ============================================================================
 
-/// Get the version of the tsai-rs library.
 #[pyfunction]
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Print system information for debugging.
 #[pyfunction]
 fn my_setup<'py>(py: Python<'py>) -> PyResult<PyObject> {
-    use pyo3::types::PyDict;
-
-    let info = PyDict::new(py);
+    let info = pyo3::types::PyDict::new_bound(py);
     info.set_item("tsai_rs", version())?;
-    info.set_item("rust_version", env!("CARGO_PKG_RUST_VERSION"))?;
 
-    // Print info
     println!("tsai-rs version: {}", version());
     println!("Available UCR datasets: {}", get_UCR_univariate_list().len());
 
-    Ok(info.into_pyobject(py)?.into_any().unbind())
+    Ok(info.unbind().into())
 }
 
 // ============================================================================
 // Module definition
 // ============================================================================
 
-/// tsai-rs: Time Series AI in Rust
-///
-/// Python bindings for the tsai-rs deep learning library for time series.
 #[pymodule]
 fn tsai_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Version and utils
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(my_setup, m)?)?;
 
-    // Data loading
     m.add_function(wrap_pyfunction!(get_UCR_univariate_list, m)?)?;
     m.add_function(wrap_pyfunction!(get_UCR_multivariate_list, m)?)?;
     m.add_function(wrap_pyfunction!(get_UCR_data, m)?)?;
@@ -1065,7 +957,6 @@ fn tsai_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(train_test_split_indices, m)?)?;
     m.add_class::<TSDataset>()?;
 
-    // Model configs
     m.add_class::<InceptionTimePlusConfig>()?;
     m.add_class::<ResNetPlusConfig>()?;
     m.add_class::<PatchTSTConfig>()?;
@@ -1073,23 +964,19 @@ fn tsai_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RNNPlusConfig>()?;
     m.add_class::<MiniRocketConfig>()?;
 
-    // Training
     m.add_class::<LearnerConfig>()?;
     m.add_class::<OneCycleLR>()?;
 
-    // Analysis
     m.add_class::<ConfusionMatrix>()?;
     m.add_class::<TopLoss>()?;
     m.add_function(wrap_pyfunction!(confusion_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(top_losses, m)?)?;
 
-    // Transforms
     m.add_function(wrap_pyfunction!(compute_gasf, m)?)?;
     m.add_function(wrap_pyfunction!(compute_gadf, m)?)?;
     m.add_function(wrap_pyfunction!(compute_recurrence_plot, m)?)?;
     m.add_function(wrap_pyfunction!(ts_standardize, m)?)?;
 
-    // Augmentations
     m.add_function(wrap_pyfunction!(add_gaussian_noise, m)?)?;
     m.add_function(wrap_pyfunction!(mag_scale, m)?)?;
 

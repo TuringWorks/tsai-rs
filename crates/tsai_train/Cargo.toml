@@ -13,13 +13,12 @@ default = ["backend-ndarray"]
 backend-ndarray = ["tsai_core/backend-ndarray", "tsai_data/backend-ndarray", "tsai_models/backend-ndarray"]
 backend-wgpu = ["tsai_core/backend-wgpu", "tsai_data/backend-wgpu", "tsai_models/backend-wgpu", "burn-wgpu"]
 backend-tch = ["tsai_core/backend-tch", "tsai_data/backend-tch", "tsai_models/backend-tch"]
-polars-io = ["tsai_data/polars-io"]
 wandb = ["reqwest"]
 
 [dependencies]
-tsai_core = { workspace = true, default-features = false }
-tsai_data = { workspace = true, default-features = false }
-tsai_models = { workspace = true, default-features = false }
+tsai_core = { workspace = true }
+tsai_data = { workspace = true }
+tsai_models = { workspace = true }
 
 burn = { workspace = true }
 burn-ndarray = { workspace = true }

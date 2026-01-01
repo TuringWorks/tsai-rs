@@ -41,10 +41,11 @@ pub mod scheduler;
 pub mod training;
 
 pub use callback::{
-    Callback, CallbackContext, CallbackList, CheckpointMetadata, EarlyStoppingCallback,
-    GradientClipCallback, GradientClipMode, HistoryCallback, MixedPrecisionCallback,
-    ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback, TerminateOnNanCallback,
-    TransformSchedule, TransformSchedulerCallback, WeightedPerSampleLossCallback, WeightStrategy,
+    BatchSubsamplerCallback, Callback, CallbackContext, CallbackList, CheckpointMetadata,
+    EarlyStoppingCallback, GradientClipCallback, GradientClipMode, HistoryCallback,
+    MixedPrecisionCallback, ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback,
+    SubsampleStrategy, TerminateOnNanCallback, TransformSchedule, TransformSchedulerCallback,
+    WeightedPerSampleLossCallback, WeightStrategy,
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};

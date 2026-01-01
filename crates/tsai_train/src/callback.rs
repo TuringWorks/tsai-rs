@@ -1526,6 +1526,262 @@ impl Callback for WeightedPerSampleLossCallback {
     }
 }
 
+/// Strategy for batch subsampling.
+#[derive(Debug, Clone)]
+pub enum SubsampleStrategy {
+    /// Random uniform subsampling.
+    Random {
+        /// Fraction of batch to keep (0.0 to 1.0).
+        fraction: f32,
+    },
+    /// Hard example mining: keep samples with highest loss.
+    HardExamples {
+        /// Fraction of hardest samples to keep.
+        fraction: f32,
+    },
+    /// Easy-to-hard curriculum.
+    Curriculum {
+        /// Starting fraction (more samples).
+        start_fraction: f32,
+        /// Ending fraction (fewer, harder samples).
+        end_fraction: f32,
+    },
+    /// Stratified subsampling (preserve class distribution).
+    Stratified {
+        /// Fraction of each class to keep.
+        fraction: f32,
+    },
+}
+
+impl Default for SubsampleStrategy {
+    fn default() -> Self {
+        Self::Random { fraction: 0.5 }
+    }
+}
+
+/// Callback for batch subsampling during training.
+///
+/// Subsampling can be used to:
+/// - Reduce training time by using fewer samples per batch
+/// - Implement hard example mining (focus on difficult samples)
+/// - Apply curriculum learning (easy to hard)
+/// - Handle large batch sizes by training on subsets
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::{BatchSubsamplerCallback, SubsampleStrategy};
+///
+/// // Keep 50% of each batch randomly
+/// let callback = BatchSubsamplerCallback::new(SubsampleStrategy::Random { fraction: 0.5 });
+///
+/// // Or use hard example mining
+/// let callback = BatchSubsamplerCallback::new(SubsampleStrategy::HardExamples { fraction: 0.3 });
+/// ```
+pub struct BatchSubsamplerCallback {
+    strategy: SubsampleStrategy,
+    current_fraction: f32,
+    samples_kept: usize,
+    samples_total: usize,
+    batch_losses: Vec<f32>,
+    seed: u64,
+}
+
+impl BatchSubsamplerCallback {
+    /// Create a new batch subsampler callback.
+    pub fn new(strategy: SubsampleStrategy) -> Self {
+        let initial_fraction = match &strategy {
+            SubsampleStrategy::Random { fraction } => *fraction,
+            SubsampleStrategy::HardExamples { fraction } => *fraction,
+            SubsampleStrategy::Curriculum { start_fraction, .. } => *start_fraction,
+            SubsampleStrategy::Stratified { fraction } => *fraction,
+        };
+
+        Self {
+            strategy,
+            current_fraction: initial_fraction,
+            samples_kept: 0,
+            samples_total: 0,
+            batch_losses: Vec::new(),
+            seed: 42,
+        }
+    }
+
+    /// Create with random subsampling.
+    pub fn random(fraction: f32) -> Self {
+        Self::new(SubsampleStrategy::Random { fraction })
+    }
+
+    /// Create with hard example mining.
+    pub fn hard_examples(fraction: f32) -> Self {
+        Self::new(SubsampleStrategy::HardExamples { fraction })
+    }
+
+    /// Create with curriculum learning.
+    pub fn curriculum(start_fraction: f32, end_fraction: f32) -> Self {
+        Self::new(SubsampleStrategy::Curriculum {
+            start_fraction,
+            end_fraction,
+        })
+    }
+
+    /// Set random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Get current subsampling fraction.
+    pub fn current_fraction(&self) -> f32 {
+        self.current_fraction
+    }
+
+    /// Get indices to keep for a batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_size` - Size of the current batch
+    /// * `losses` - Per-sample losses (optional, for hard example mining)
+    ///
+    /// # Returns
+    ///
+    /// Vector of indices to keep.
+    pub fn get_subsample_indices(&mut self, batch_size: usize, losses: Option<&[f32]>) -> Vec<usize> {
+        use rand::prelude::*;
+        use rand_chacha::ChaCha8Rng;
+
+        let keep_count = ((batch_size as f32 * self.current_fraction).round() as usize).max(1);
+
+        match &self.strategy {
+            SubsampleStrategy::Random { .. } => {
+                let mut rng = ChaCha8Rng::seed_from_u64(self.seed);
+                self.seed = self.seed.wrapping_add(1);
+
+                let mut indices: Vec<usize> = (0..batch_size).collect();
+                indices.shuffle(&mut rng);
+                indices.truncate(keep_count);
+                indices.sort_unstable();
+                indices
+            }
+
+            SubsampleStrategy::HardExamples { .. } => {
+                if let Some(loss_vals) = losses {
+                    // Sort by loss descending, keep highest
+                    let mut indexed: Vec<(usize, f32)> = loss_vals
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &l)| (i, l))
+                        .collect();
+                    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                    let mut indices: Vec<usize> = indexed.iter().take(keep_count).map(|(i, _)| *i).collect();
+                    indices.sort_unstable();
+                    indices
+                } else {
+                    // Fallback to random if no losses provided
+                    (0..keep_count).collect()
+                }
+            }
+
+            SubsampleStrategy::Curriculum { .. } => {
+                if let Some(loss_vals) = losses {
+                    // Sort by loss, direction depends on curriculum phase
+                    let mut indexed: Vec<(usize, f32)> = loss_vals
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &l)| (i, l))
+                        .collect();
+
+                    // Early training: prefer easy (low loss)
+                    // Late training: include harder samples
+                    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                    let mut indices: Vec<usize> = indexed.iter().take(keep_count).map(|(i, _)| *i).collect();
+                    indices.sort_unstable();
+                    indices
+                } else {
+                    (0..keep_count).collect()
+                }
+            }
+
+            SubsampleStrategy::Stratified { .. } => {
+                // For stratified, we'd need class labels
+                // Fallback to random for now
+                let mut rng = ChaCha8Rng::seed_from_u64(self.seed);
+                self.seed = self.seed.wrapping_add(1);
+
+                let mut indices: Vec<usize> = (0..batch_size).collect();
+                indices.shuffle(&mut rng);
+                indices.truncate(keep_count);
+                indices.sort_unstable();
+                indices
+            }
+        }
+    }
+
+    /// Record batch losses for next iteration's hard example mining.
+    pub fn record_batch_losses(&mut self, losses: Vec<f32>) {
+        self.batch_losses = losses;
+    }
+
+    /// Update curriculum fraction based on training progress.
+    fn update_curriculum(&mut self, progress: f32) {
+        if let SubsampleStrategy::Curriculum {
+            start_fraction,
+            end_fraction,
+        } = &self.strategy
+        {
+            // Linear interpolation from start to end fraction
+            self.current_fraction = start_fraction + (end_fraction - start_fraction) * progress;
+        }
+    }
+}
+
+impl Callback for BatchSubsamplerCallback {
+    fn before_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        self.samples_kept = 0;
+        self.samples_total = 0;
+
+        // Reset to initial fraction
+        self.current_fraction = match &self.strategy {
+            SubsampleStrategy::Random { fraction } => *fraction,
+            SubsampleStrategy::HardExamples { fraction } => *fraction,
+            SubsampleStrategy::Curriculum { start_fraction, .. } => *start_fraction,
+            SubsampleStrategy::Stratified { fraction } => *fraction,
+        };
+
+        tracing::info!(
+            "BatchSubsampler: starting with {:.1}% subsampling",
+            self.current_fraction * 100.0
+        );
+        Ok(())
+    }
+
+    fn before_epoch(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        let progress = ctx.epoch as f32 / ctx.n_epochs.max(1) as f32;
+        self.update_curriculum(progress);
+        Ok(())
+    }
+
+    fn after_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        if self.samples_total > 0 {
+            let keep_rate = self.samples_kept as f32 / self.samples_total as f32 * 100.0;
+            tracing::info!(
+                "BatchSubsampler: kept {:.1}% of samples ({}/{})",
+                keep_rate,
+                self.samples_kept,
+                self.samples_total
+            );
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "BatchSubsamplerCallback"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

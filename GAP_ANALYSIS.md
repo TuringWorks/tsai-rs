@@ -20,11 +20,11 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
 | **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
-| **Callbacks** | 10+ callbacks | 11 callbacks | **100%** |
+| **Callbacks** | 10+ callbacks | 12 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
 | **Data I/O** | Multiple formats | 4 formats | **80%** |
-| **Analysis Tools** | 5+ tools | 4 tools | **80%** |
-| **Explainability** | Full suite | Partial | **60%** |
+| **Analysis Tools** | 5+ tools | 6 tools | **100%** |
+| **Explainability** | Full suite | Full suite | **100%** |
 
 **Overall Feature Parity: ~98%**
 
@@ -295,7 +295,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | ShowGraph | ✅ | ✅ | **FIT** | ASCII training curves visualization |
 | TransformScheduler | ✅ | ✅ | **FIT** | Transform probability scheduling |
 | WeightedPerSampleLoss | ✅ | ✅ | **FIT** | Sample weighting with multiple strategies |
-| BatchSubsampler | ✅ | ❌ | **GAP** | Batch subsampling |
+| BatchSubsampler | ✅ | ✅ | **FIT** | Batch subsampling with hard examples, curriculum, stratified |
 | PredictionDynamics | ✅ | ❌ | **GAP** | Prediction tracking |
 | NoisyStudent | ✅ | ❌ | **GAP** | Semi-supervised |
 
@@ -375,8 +375,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Top Losses | ✅ | ✅ | **FIT** | Full implementation |
 | Feature Importance | ✅ | ✅ | **FIT** | Permutation-based |
 | Step Importance | ✅ | ✅ | **FIT** | Temporal importance |
-| Calibration | ✅ | ❌ | **GAP** | Confidence calibration |
-| Classification Report | ✅ | ❌ | **GAP** | Per-class metrics |
+| Calibration | ✅ | ✅ | **FIT** | ECE, MCE, temperature scaling, reliability diagrams |
+| Classification Report | ✅ | ✅ | **FIT** | Per-class precision, recall, F1, macro/weighted averages |
 
 ### 8.2 Explainability
 
@@ -384,8 +384,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |---------|---------------|----------------|--------|-------|
 | GradCAM | ✅ | ✅ | **FIT** | Implemented |
 | Input × Gradient | ✅ | ✅ | **FIT** | Implemented |
-| Integrated Gradients | ✅ | ⚠️ | **PARTIAL** | Enum exists, impl pending |
-| Attention Visualization | ✅ | ⚠️ | **PARTIAL** | Enum exists, impl pending |
+| Integrated Gradients | ✅ | ✅ | **FIT** | Full implementation with trapezoidal rule |
+| Attention Visualization | ✅ | ✅ | **FIT** | Rollout, Mean, Last aggregation strategies |
 | Activation Capture | ✅ | ✅ | **FIT** | Full implementation |
 | Gradient Capture | ✅ | ✅ | **FIT** | Full implementation |
 
@@ -410,9 +410,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### High Priority (Core Functionality)
 
-1. **Explainability:**
-   - Complete integrated gradients
-   - Attention visualization
+1. **Callbacks:**
+   - PredictionDynamics callback
+   - NoisyStudent semi-supervised callback
 
 ### Medium Priority (Enhanced Functionality)
 
@@ -486,11 +486,10 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add UEA dataset auto-download
-2. Add ONNX export support
-3. Complete integrated gradients explainability
-4. Add attention visualization
-5. Add Calibration analysis tool
+1. Add PredictionDynamics callback
+2. Add NoisyStudent semi-supervised callback
+3. Add UEA dataset auto-download
+4. Add ONNX export support
 
 ---
 

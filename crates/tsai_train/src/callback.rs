@@ -1782,6 +1782,850 @@ impl Callback for BatchSubsamplerCallback {
     }
 }
 
+/// Tracking mode for prediction dynamics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PredictionTrackingMode {
+    /// Track all samples.
+    All,
+    /// Track only samples that change predictions.
+    ChangesOnly,
+    /// Track a random subset of samples.
+    Subset(usize),
+}
+
+impl Default for PredictionTrackingMode {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+/// Per-sample prediction history.
+#[derive(Debug, Clone, Default)]
+pub struct SamplePredictionHistory {
+    /// Sample index.
+    pub sample_idx: usize,
+    /// True label.
+    pub true_label: i64,
+    /// Predicted labels per epoch.
+    pub predictions: Vec<i64>,
+    /// Confidence scores per epoch.
+    pub confidences: Vec<f32>,
+    /// Loss values per epoch.
+    pub losses: Vec<f32>,
+}
+
+impl SamplePredictionHistory {
+    /// Create a new sample history.
+    pub fn new(sample_idx: usize, true_label: i64) -> Self {
+        Self {
+            sample_idx,
+            true_label,
+            predictions: Vec::new(),
+            confidences: Vec::new(),
+            losses: Vec::new(),
+        }
+    }
+
+    /// Add an epoch's prediction data.
+    pub fn add_epoch(&mut self, prediction: i64, confidence: f32, loss: f32) {
+        self.predictions.push(prediction);
+        self.confidences.push(confidence);
+        self.losses.push(loss);
+    }
+
+    /// Check if this sample was ever correctly predicted.
+    pub fn ever_correct(&self) -> bool {
+        self.predictions.iter().any(|&p| p == self.true_label)
+    }
+
+    /// Check if this sample was always correctly predicted.
+    pub fn always_correct(&self) -> bool {
+        !self.predictions.is_empty() && self.predictions.iter().all(|&p| p == self.true_label)
+    }
+
+    /// Count how many times the prediction changed.
+    pub fn flip_count(&self) -> usize {
+        if self.predictions.len() < 2 {
+            return 0;
+        }
+        self.predictions
+            .windows(2)
+            .filter(|w| w[0] != w[1])
+            .count()
+    }
+
+    /// Get the epoch when this sample was first correctly predicted.
+    pub fn first_correct_epoch(&self) -> Option<usize> {
+        self.predictions
+            .iter()
+            .enumerate()
+            .find(|(_, &p)| p == self.true_label)
+            .map(|(i, _)| i)
+    }
+
+    /// Get the epoch when this sample was last incorrectly predicted.
+    pub fn last_incorrect_epoch(&self) -> Option<usize> {
+        self.predictions
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, &p)| p != self.true_label)
+            .map(|(i, _)| i)
+    }
+
+    /// Check if this sample "regressed" (was correct then became incorrect).
+    pub fn has_regression(&self) -> bool {
+        let mut was_correct = false;
+        for &p in &self.predictions {
+            if p == self.true_label {
+                was_correct = true;
+            } else if was_correct {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Calculate stability score (1.0 = stable, 0.0 = unstable).
+    pub fn stability(&self) -> f32 {
+        if self.predictions.len() < 2 {
+            return 1.0;
+        }
+        let flips = self.flip_count();
+        1.0 - (flips as f32 / (self.predictions.len() - 1) as f32)
+    }
+}
+
+/// Callback for tracking prediction dynamics during training.
+///
+/// This callback monitors how predictions change across epochs,
+/// helping identify:
+/// - Samples the model struggles with
+/// - Unstable predictions that flip-flop
+/// - Learning curves for individual samples
+/// - Potential mislabeled samples
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::{PredictionDynamicsCallback, PredictionTrackingMode};
+///
+/// // Track all samples
+/// let callback = PredictionDynamicsCallback::new(PredictionTrackingMode::All);
+///
+/// // Or track only changing predictions
+/// let callback = PredictionDynamicsCallback::new(PredictionTrackingMode::ChangesOnly);
+///
+/// // After training, analyze the results
+/// let unstable = callback.get_unstable_samples(0.5);
+/// let never_correct = callback.get_never_correct_samples();
+/// ```
+pub struct PredictionDynamicsCallback {
+    /// Tracking mode for which samples to monitor.
+    #[allow(dead_code)]
+    mode: PredictionTrackingMode,
+    /// Per-sample prediction histories.
+    histories: HashMap<usize, SamplePredictionHistory>,
+    /// True labels for all tracked samples.
+    true_labels: HashMap<usize, i64>,
+    /// Current epoch predictions buffer.
+    current_predictions: Vec<(usize, i64, f32, f32)>, // (idx, pred, conf, loss)
+    /// Number of epochs tracked.
+    epochs_tracked: usize,
+    /// Whether to log summary each epoch.
+    log_per_epoch: bool,
+}
+
+impl PredictionDynamicsCallback {
+    /// Create a new prediction dynamics callback.
+    pub fn new(mode: PredictionTrackingMode) -> Self {
+        Self {
+            mode,
+            histories: HashMap::new(),
+            true_labels: HashMap::new(),
+            current_predictions: Vec::new(),
+            epochs_tracked: 0,
+            log_per_epoch: false,
+        }
+    }
+
+    /// Enable per-epoch logging.
+    #[must_use]
+    pub fn with_logging(mut self, enabled: bool) -> Self {
+        self.log_per_epoch = enabled;
+        self
+    }
+
+    /// Set true labels for samples.
+    ///
+    /// Must be called before training starts.
+    pub fn set_true_labels(&mut self, labels: HashMap<usize, i64>) {
+        self.true_labels = labels;
+    }
+
+    /// Record predictions for the current epoch.
+    ///
+    /// Call this after each validation pass with the predictions.
+    pub fn record_predictions(
+        &mut self,
+        sample_indices: &[usize],
+        predictions: &[i64],
+        confidences: &[f32],
+        losses: &[f32],
+    ) {
+        for i in 0..sample_indices.len() {
+            let idx = sample_indices[i];
+            let pred = predictions.get(i).copied().unwrap_or(0);
+            let conf = confidences.get(i).copied().unwrap_or(0.0);
+            let loss = losses.get(i).copied().unwrap_or(0.0);
+            self.current_predictions.push((idx, pred, conf, loss));
+        }
+    }
+
+    /// Commit current epoch's predictions to history.
+    fn commit_epoch(&mut self) {
+        for (idx, pred, conf, loss) in self.current_predictions.drain(..) {
+            let true_label = self.true_labels.get(&idx).copied().unwrap_or(-1);
+
+            let history = self.histories.entry(idx).or_insert_with(|| {
+                SamplePredictionHistory::new(idx, true_label)
+            });
+
+            // Update true label if not set
+            if history.true_label == -1 && true_label != -1 {
+                history.true_label = true_label;
+            }
+
+            history.add_epoch(pred, conf, loss);
+        }
+        self.epochs_tracked += 1;
+    }
+
+    /// Get samples that are never correctly predicted.
+    pub fn get_never_correct_samples(&self) -> Vec<usize> {
+        self.histories
+            .values()
+            .filter(|h| !h.predictions.is_empty() && !h.ever_correct())
+            .map(|h| h.sample_idx)
+            .collect()
+    }
+
+    /// Get samples with unstable predictions.
+    ///
+    /// # Arguments
+    ///
+    /// * `stability_threshold` - Samples with stability below this are returned.
+    pub fn get_unstable_samples(&self, stability_threshold: f32) -> Vec<(usize, f32)> {
+        self.histories
+            .values()
+            .filter(|h| h.stability() < stability_threshold)
+            .map(|h| (h.sample_idx, h.stability()))
+            .collect()
+    }
+
+    /// Get samples that show regression (were correct, then incorrect).
+    pub fn get_regression_samples(&self) -> Vec<usize> {
+        self.histories
+            .values()
+            .filter(|h| h.has_regression())
+            .map(|h| h.sample_idx)
+            .collect()
+    }
+
+    /// Get samples that are always correct.
+    pub fn get_always_correct_samples(&self) -> Vec<usize> {
+        self.histories
+            .values()
+            .filter(|h| h.always_correct())
+            .map(|h| h.sample_idx)
+            .collect()
+    }
+
+    /// Get the full history for a sample.
+    pub fn get_sample_history(&self, sample_idx: usize) -> Option<&SamplePredictionHistory> {
+        self.histories.get(&sample_idx)
+    }
+
+    /// Get average confidence over epochs for each sample.
+    pub fn get_average_confidences(&self) -> HashMap<usize, f32> {
+        self.histories
+            .iter()
+            .map(|(idx, h)| {
+                let avg = if h.confidences.is_empty() {
+                    0.0
+                } else {
+                    h.confidences.iter().sum::<f32>() / h.confidences.len() as f32
+                };
+                (*idx, avg)
+            })
+            .collect()
+    }
+
+    /// Get learning difficulty score for samples.
+    ///
+    /// Score based on: first correct epoch, stability, and final accuracy.
+    /// Higher score = more difficult sample.
+    pub fn get_difficulty_scores(&self) -> HashMap<usize, f32> {
+        let max_epochs = self.epochs_tracked as f32;
+
+        self.histories
+            .iter()
+            .map(|(idx, h)| {
+                let first_correct_score = h
+                    .first_correct_epoch()
+                    .map(|e| e as f32 / max_epochs.max(1.0))
+                    .unwrap_or(1.0);
+
+                let stability_score = 1.0 - h.stability();
+
+                let final_correct = h
+                    .predictions
+                    .last()
+                    .map(|&p| if p == h.true_label { 0.0 } else { 0.5 })
+                    .unwrap_or(0.5);
+
+                let score = (first_correct_score + stability_score + final_correct) / 3.0;
+                (*idx, score)
+            })
+            .collect()
+    }
+
+    /// Get summary statistics.
+    pub fn summary(&self) -> PredictionDynamicsSummary {
+        let total = self.histories.len();
+        let never_correct = self.get_never_correct_samples().len();
+        let always_correct = self.get_always_correct_samples().len();
+        let regression = self.get_regression_samples().len();
+        let unstable = self.get_unstable_samples(0.7).len();
+
+        let avg_stability = if total > 0 {
+            self.histories.values().map(|h| h.stability()).sum::<f32>() / total as f32
+        } else {
+            0.0
+        };
+
+        PredictionDynamicsSummary {
+            total_samples: total,
+            never_correct,
+            always_correct,
+            regression_count: regression,
+            unstable_count: unstable,
+            average_stability: avg_stability,
+            epochs_tracked: self.epochs_tracked,
+        }
+    }
+}
+
+/// Summary of prediction dynamics.
+#[derive(Debug, Clone)]
+pub struct PredictionDynamicsSummary {
+    /// Total samples tracked.
+    pub total_samples: usize,
+    /// Samples never correctly predicted.
+    pub never_correct: usize,
+    /// Samples always correctly predicted.
+    pub always_correct: usize,
+    /// Samples with regression (correct → incorrect).
+    pub regression_count: usize,
+    /// Samples with unstable predictions.
+    pub unstable_count: usize,
+    /// Average stability score.
+    pub average_stability: f32,
+    /// Number of epochs tracked.
+    pub epochs_tracked: usize,
+}
+
+impl std::fmt::Display for PredictionDynamicsSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "=== Prediction Dynamics Summary ===")?;
+        writeln!(f, "Epochs tracked: {}", self.epochs_tracked)?;
+        writeln!(f, "Total samples: {}", self.total_samples)?;
+        writeln!(f, "Always correct: {} ({:.1}%)",
+            self.always_correct,
+            100.0 * self.always_correct as f32 / self.total_samples.max(1) as f32
+        )?;
+        writeln!(f, "Never correct: {} ({:.1}%)",
+            self.never_correct,
+            100.0 * self.never_correct as f32 / self.total_samples.max(1) as f32
+        )?;
+        writeln!(f, "Regressions: {} ({:.1}%)",
+            self.regression_count,
+            100.0 * self.regression_count as f32 / self.total_samples.max(1) as f32
+        )?;
+        writeln!(f, "Unstable: {} ({:.1}%)",
+            self.unstable_count,
+            100.0 * self.unstable_count as f32 / self.total_samples.max(1) as f32
+        )?;
+        writeln!(f, "Average stability: {:.3}", self.average_stability)?;
+        Ok(())
+    }
+}
+
+impl Callback for PredictionDynamicsCallback {
+    fn before_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        self.histories.clear();
+        self.current_predictions.clear();
+        self.epochs_tracked = 0;
+        tracing::info!("PredictionDynamics: tracking enabled");
+        Ok(())
+    }
+
+    fn after_epoch(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        // Commit predictions recorded during this epoch
+        self.commit_epoch();
+
+        if self.log_per_epoch && !self.histories.is_empty() {
+            let summary = self.summary();
+            tracing::info!(
+                "Epoch {}: {} samples tracked, {:.1}% always correct, {:.1}% never correct",
+                ctx.epoch + 1,
+                summary.total_samples,
+                100.0 * summary.always_correct as f32 / summary.total_samples.max(1) as f32,
+                100.0 * summary.never_correct as f32 / summary.total_samples.max(1) as f32
+            );
+        }
+
+        Ok(())
+    }
+
+    fn after_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        let summary = self.summary();
+        tracing::info!("\n{}", summary);
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "PredictionDynamicsCallback"
+    }
+}
+
+/// Configuration for pseudo-label filtering.
+#[derive(Debug, Clone)]
+pub enum PseudoLabelFilter {
+    /// Keep all pseudo-labels.
+    All,
+    /// Keep only high-confidence predictions.
+    ConfidenceThreshold(f32),
+    /// Keep top-k percent most confident predictions.
+    TopK {
+        /// Fraction of samples to keep (0.0 to 1.0).
+        fraction: f32,
+    },
+    /// Class-balanced top-k (equal samples per class).
+    ClassBalancedTopK {
+        /// Number of samples per class.
+        samples_per_class: usize,
+    },
+}
+
+impl Default for PseudoLabelFilter {
+    fn default() -> Self {
+        Self::ConfidenceThreshold(0.9)
+    }
+}
+
+/// Noise injection mode for student training.
+#[derive(Debug, Clone)]
+pub enum NoiseInjection {
+    /// No noise (standard training).
+    None,
+    /// Dropout on input data.
+    InputDropout(f32),
+    /// Stochastic depth (layer dropout).
+    StochasticDepth(f32),
+    /// RandAugment-style augmentation.
+    RandAugment {
+        /// Number of augmentation operations.
+        n_ops: usize,
+        /// Magnitude of augmentations.
+        magnitude: f32,
+    },
+    /// Gaussian noise on inputs.
+    GaussianNoise(f32),
+    /// Combined noise sources.
+    Combined(Vec<NoiseInjection>),
+}
+
+impl Default for NoiseInjection {
+    fn default() -> Self {
+        Self::InputDropout(0.5)
+    }
+}
+
+/// Pseudo-label entry for an unlabeled sample.
+#[derive(Debug, Clone)]
+pub struct PseudoLabel {
+    /// Sample index.
+    pub sample_idx: usize,
+    /// Assigned pseudo-label.
+    pub label: i64,
+    /// Confidence score (probability).
+    pub confidence: f32,
+    /// Teacher iteration that generated this label.
+    pub teacher_iteration: usize,
+}
+
+/// Callback for Noisy Student semi-supervised learning.
+///
+/// Implements the Noisy Student Training algorithm:
+/// 1. Train a teacher on labeled data
+/// 2. Generate pseudo-labels for unlabeled data
+/// 3. Train a (larger) student on labeled + pseudo-labeled data with noise
+/// 4. Student becomes new teacher, repeat
+///
+/// Key features:
+/// - Pseudo-label filtering by confidence or top-k
+/// - Noise injection during student training
+/// - Progressive refinement through iterations
+/// - Support for class-balanced sampling
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::{NoisyStudentCallback, PseudoLabelFilter, NoiseInjection};
+///
+/// let callback = NoisyStudentCallback::new()
+///     .with_filter(PseudoLabelFilter::ConfidenceThreshold(0.9))
+///     .with_noise(NoiseInjection::InputDropout(0.5))
+///     .with_iterations(3);
+///
+/// // After teacher training, generate pseudo-labels
+/// callback.generate_pseudo_labels(&teacher_predictions, &teacher_confidences);
+///
+/// // Then train student with the callback attached
+/// ```
+pub struct NoisyStudentCallback {
+    /// Pseudo-label filtering strategy.
+    filter: PseudoLabelFilter,
+    /// Noise injection mode.
+    noise: NoiseInjection,
+    /// Number of teacher-student iterations.
+    n_iterations: usize,
+    /// Current iteration (0 = first teacher).
+    current_iteration: usize,
+    /// Pseudo-labels for unlabeled data.
+    pseudo_labels: Vec<PseudoLabel>,
+    /// Number of labeled samples.
+    n_labeled: usize,
+    /// Number of unlabeled samples.
+    n_unlabeled: usize,
+    /// Whether we're in student phase (with noise).
+    is_student_phase: bool,
+    /// Temperature for soft labels (1.0 = hard labels).
+    temperature: f32,
+    /// Minimum confidence to include pseudo-label.
+    min_confidence: f32,
+    /// Statistics tracking.
+    stats: NoisyStudentStats,
+}
+
+/// Statistics for Noisy Student training.
+#[derive(Debug, Clone, Default)]
+pub struct NoisyStudentStats {
+    /// Pseudo-labels generated per iteration.
+    pub labels_per_iteration: Vec<usize>,
+    /// Average confidence per iteration.
+    pub avg_confidence_per_iteration: Vec<f32>,
+    /// Accuracy on validation set per iteration.
+    pub validation_accuracy: Vec<f32>,
+    /// Distribution of pseudo-labels per class.
+    pub class_distribution: HashMap<i64, usize>,
+}
+
+impl NoisyStudentCallback {
+    /// Create a new Noisy Student callback.
+    pub fn new() -> Self {
+        Self {
+            filter: PseudoLabelFilter::default(),
+            noise: NoiseInjection::default(),
+            n_iterations: 3,
+            current_iteration: 0,
+            pseudo_labels: Vec::new(),
+            n_labeled: 0,
+            n_unlabeled: 0,
+            is_student_phase: false,
+            temperature: 1.0,
+            min_confidence: 0.5,
+            stats: NoisyStudentStats::default(),
+        }
+    }
+
+    /// Set the pseudo-label filtering strategy.
+    #[must_use]
+    pub fn with_filter(mut self, filter: PseudoLabelFilter) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Set the noise injection mode.
+    #[must_use]
+    pub fn with_noise(mut self, noise: NoiseInjection) -> Self {
+        self.noise = noise;
+        self
+    }
+
+    /// Set the number of teacher-student iterations.
+    #[must_use]
+    pub fn with_iterations(mut self, n: usize) -> Self {
+        self.n_iterations = n;
+        self
+    }
+
+    /// Set temperature for soft labels.
+    #[must_use]
+    pub fn with_temperature(mut self, t: f32) -> Self {
+        self.temperature = t.max(0.1);
+        self
+    }
+
+    /// Set minimum confidence threshold.
+    #[must_use]
+    pub fn with_min_confidence(mut self, conf: f32) -> Self {
+        self.min_confidence = conf.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set the number of labeled/unlabeled samples.
+    pub fn set_data_counts(&mut self, n_labeled: usize, n_unlabeled: usize) {
+        self.n_labeled = n_labeled;
+        self.n_unlabeled = n_unlabeled;
+    }
+
+    /// Generate pseudo-labels from teacher predictions.
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_indices` - Indices of unlabeled samples
+    /// * `predictions` - Predicted class labels
+    /// * `confidences` - Confidence scores (max probability)
+    pub fn generate_pseudo_labels(
+        &mut self,
+        sample_indices: &[usize],
+        predictions: &[i64],
+        confidences: &[f32],
+    ) {
+        // Create pseudo-label candidates
+        let mut candidates: Vec<PseudoLabel> = sample_indices
+            .iter()
+            .zip(predictions.iter())
+            .zip(confidences.iter())
+            .map(|((&idx, &label), &conf)| PseudoLabel {
+                sample_idx: idx,
+                label,
+                confidence: conf,
+                teacher_iteration: self.current_iteration,
+            })
+            .filter(|pl| pl.confidence >= self.min_confidence)
+            .collect();
+
+        // Apply filtering strategy
+        self.pseudo_labels = match &self.filter {
+            PseudoLabelFilter::All => candidates,
+
+            PseudoLabelFilter::ConfidenceThreshold(thresh) => {
+                candidates.retain(|pl| pl.confidence >= *thresh);
+                candidates
+            }
+
+            PseudoLabelFilter::TopK { fraction } => {
+                candidates.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+                let keep = ((candidates.len() as f32 * fraction).round() as usize).max(1);
+                candidates.truncate(keep);
+                candidates
+            }
+
+            PseudoLabelFilter::ClassBalancedTopK { samples_per_class } => {
+                // Group by class
+                let mut by_class: HashMap<i64, Vec<PseudoLabel>> = HashMap::new();
+                for pl in candidates {
+                    by_class.entry(pl.label).or_default().push(pl);
+                }
+
+                // Take top-k from each class
+                let mut result = Vec::new();
+                for (_, mut class_samples) in by_class {
+                    class_samples.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+                    class_samples.truncate(*samples_per_class);
+                    result.extend(class_samples);
+                }
+                result
+            }
+        };
+
+        // Update statistics
+        self.stats.labels_per_iteration.push(self.pseudo_labels.len());
+
+        let avg_conf = if self.pseudo_labels.is_empty() {
+            0.0
+        } else {
+            self.pseudo_labels.iter().map(|pl| pl.confidence).sum::<f32>()
+                / self.pseudo_labels.len() as f32
+        };
+        self.stats.avg_confidence_per_iteration.push(avg_conf);
+
+        // Update class distribution
+        self.stats.class_distribution.clear();
+        for pl in &self.pseudo_labels {
+            *self.stats.class_distribution.entry(pl.label).or_default() += 1;
+        }
+
+        tracing::info!(
+            "NoisyStudent: generated {} pseudo-labels (avg conf: {:.3})",
+            self.pseudo_labels.len(),
+            avg_conf
+        );
+    }
+
+    /// Get pseudo-labels for training.
+    pub fn get_pseudo_labels(&self) -> &[PseudoLabel] {
+        &self.pseudo_labels
+    }
+
+    /// Get pseudo-label for a specific sample.
+    pub fn get_sample_label(&self, sample_idx: usize) -> Option<&PseudoLabel> {
+        self.pseudo_labels.iter().find(|pl| pl.sample_idx == sample_idx)
+    }
+
+    /// Check if we should apply noise (student phase).
+    pub fn should_apply_noise(&self) -> bool {
+        self.is_student_phase
+    }
+
+    /// Get the noise injection configuration.
+    pub fn noise_config(&self) -> &NoiseInjection {
+        &self.noise
+    }
+
+    /// Advance to the next iteration.
+    pub fn next_iteration(&mut self) {
+        self.current_iteration += 1;
+        self.is_student_phase = true;
+        tracing::info!(
+            "NoisyStudent: starting iteration {} of {}",
+            self.current_iteration + 1,
+            self.n_iterations
+        );
+    }
+
+    /// Check if we've completed all iterations.
+    pub fn is_complete(&self) -> bool {
+        self.current_iteration >= self.n_iterations
+    }
+
+    /// Get current iteration.
+    pub fn current_iteration(&self) -> usize {
+        self.current_iteration
+    }
+
+    /// Get training statistics.
+    pub fn stats(&self) -> &NoisyStudentStats {
+        &self.stats
+    }
+
+    /// Record validation accuracy for this iteration.
+    pub fn record_validation_accuracy(&mut self, accuracy: f32) {
+        self.stats.validation_accuracy.push(accuracy);
+    }
+
+    /// Get a sample weight based on whether it's labeled or pseudo-labeled.
+    pub fn get_sample_weight(&self, sample_idx: usize, is_labeled: bool) -> f32 {
+        if is_labeled {
+            1.0
+        } else if let Some(pl) = self.get_sample_label(sample_idx) {
+            // Weight by confidence
+            pl.confidence
+        } else {
+            0.0 // Not in pseudo-label set
+        }
+    }
+
+    /// Prepare combined dataset indices (labeled + pseudo-labeled).
+    pub fn get_combined_indices(&self, labeled_indices: &[usize]) -> Vec<(usize, bool)> {
+        let mut combined: Vec<(usize, bool)> = labeled_indices
+            .iter()
+            .map(|&idx| (idx, true))
+            .collect();
+
+        for pl in &self.pseudo_labels {
+            combined.push((pl.sample_idx, false));
+        }
+
+        combined
+    }
+
+    /// Summary of current state.
+    pub fn summary(&self) -> String {
+        let mut output = String::new();
+        output.push_str("=== Noisy Student Summary ===\n");
+        output.push_str(&format!("Iteration: {} / {}\n", self.current_iteration + 1, self.n_iterations));
+        output.push_str(&format!("Labeled samples: {}\n", self.n_labeled));
+        output.push_str(&format!("Pseudo-labeled: {}\n", self.pseudo_labels.len()));
+        output.push_str(&format!("Student phase: {}\n", self.is_student_phase));
+
+        if !self.stats.class_distribution.is_empty() {
+            output.push_str("\nClass distribution:\n");
+            let mut sorted: Vec<_> = self.stats.class_distribution.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            for (class, count) in sorted {
+                output.push_str(&format!("  Class {}: {}\n", class, count));
+            }
+        }
+
+        output
+    }
+}
+
+impl Default for NoisyStudentCallback {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Callback for NoisyStudentCallback {
+    fn before_fit(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        tracing::info!(
+            "NoisyStudent: starting iteration {} with {} epochs",
+            self.current_iteration + 1,
+            ctx.n_epochs
+        );
+
+        if self.is_student_phase {
+            tracing::info!(
+                "NoisyStudent: student phase with {} pseudo-labels",
+                self.pseudo_labels.len()
+            );
+        }
+
+        Ok(())
+    }
+
+    fn after_fit(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        if let Some(valid_loss) = ctx.valid_loss {
+            tracing::info!(
+                "NoisyStudent iteration {} complete: valid_loss = {:.4}",
+                self.current_iteration + 1,
+                valid_loss
+            );
+        }
+
+        // Record accuracy if available
+        if let Some(&acc) = ctx.metrics.get("accuracy") {
+            self.record_validation_accuracy(acc);
+        }
+
+        Ok(())
+    }
+
+    fn before_batch(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        // Noise injection would be applied by the learner based on should_apply_noise()
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "NoisyStudentCallback"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

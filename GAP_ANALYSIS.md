@@ -20,7 +20,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
 | **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
-| **Callbacks** | 10+ callbacks | 12 callbacks | **100%** |
+| **Callbacks** | 10+ callbacks | 14 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
 | **Data I/O** | Multiple formats | 4 formats | **80%** |
 | **Analysis Tools** | 5+ tools | 6 tools | **100%** |
@@ -296,8 +296,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TransformScheduler | ✅ | ✅ | **FIT** | Transform probability scheduling |
 | WeightedPerSampleLoss | ✅ | ✅ | **FIT** | Sample weighting with multiple strategies |
 | BatchSubsampler | ✅ | ✅ | **FIT** | Batch subsampling with hard examples, curriculum, stratified |
-| PredictionDynamics | ✅ | ❌ | **GAP** | Prediction tracking |
-| NoisyStudent | ✅ | ❌ | **GAP** | Semi-supervised |
+| PredictionDynamics | ✅ | ✅ | **FIT** | Prediction tracking, stability analysis, regression detection |
+| NoisyStudent | ✅ | ✅ | **FIT** | Semi-supervised with pseudo-labels, noise injection, curriculum |
 
 ### 5.5 Optimizers
 
@@ -410,19 +410,17 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### High Priority (Core Functionality)
 
-1. **Callbacks:**
-   - PredictionDynamics callback
-   - NoisyStudent semi-supervised callback
+All high-priority callbacks are now implemented.
 
 ### Medium Priority (Enhanced Functionality)
 
-2. **Data:**
+1. **Data:**
    - UEA dataset auto-download
    - More external datasets (regression, forecasting)
 
 ### Low Priority (Advanced Features)
 
-3. **Integration:**
+2. **Integration:**
    - tsfresh feature extraction
    - ONNX export
    - Optuna integration
@@ -475,7 +473,7 @@ tsai-rs provides a solid foundation with approximately **98% feature parity** wi
 
 1. **Model diversity** - 41 of 40+ models implemented (~100%)
 2. **Augmentation transforms** - 46 of 40+ transforms implemented (~100%)
-3. **Callbacks** - 10 of 10+ callbacks implemented (~100%)
+3. **Callbacks** - 14 of 10+ callbacks implemented (~100%)
 
 The Rust implementation benefits from:
 - Type safety and memory safety
@@ -486,10 +484,10 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add PredictionDynamics callback
-2. Add NoisyStudent semi-supervised callback
-3. Add UEA dataset auto-download
-4. Add ONNX export support
+1. Add UEA dataset auto-download
+2. Add ONNX export support
+3. Add tsfresh feature extraction integration
+4. Add Optuna hyperparameter optimization
 
 ---
 

@@ -43,9 +43,11 @@ pub mod training;
 pub use callback::{
     BatchSubsamplerCallback, Callback, CallbackContext, CallbackList, CheckpointMetadata,
     EarlyStoppingCallback, GradientClipCallback, GradientClipMode, HistoryCallback,
-    MixedPrecisionCallback, ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback,
-    SubsampleStrategy, TerminateOnNanCallback, TransformSchedule, TransformSchedulerCallback,
-    WeightedPerSampleLossCallback, WeightStrategy,
+    MixedPrecisionCallback, NoiseInjection, NoisyStudentCallback, NoisyStudentStats,
+    PredictionDynamicsCallback, PredictionDynamicsSummary, PredictionTrackingMode,
+    ProgressCallback, PseudoLabel, PseudoLabelFilter, SamplePredictionHistory, SaveModelCallback,
+    SaveModelMode, ShowGraphCallback, SubsampleStrategy, TerminateOnNanCallback,
+    TransformSchedule, TransformSchedulerCallback, WeightedPerSampleLossCallback, WeightStrategy,
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};

@@ -2,6 +2,7 @@
 
 mod fcn;
 mod inception;
+mod mlp;
 mod mwdn;
 mod omniscale;
 mod resnet;
@@ -11,6 +12,7 @@ mod xception;
 
 pub use fcn::{ConvBlock, FCN, FCNConfig};
 pub use inception::{InceptionBlock, InceptionTimePlus, InceptionTimePlusConfig};
+pub use mlp::{MLP, MLPConfig};
 pub use mwdn::{MWDNConfig, WaveletType, MWDN};
 pub use omniscale::{OmniScaleCNN, OmniScaleCNNConfig};
 pub use resnet::{ResNetBlock, ResNetPlus, ResNetPlusConfig};

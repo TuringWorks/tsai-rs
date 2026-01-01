@@ -8,6 +8,7 @@
 //! - Feature and step importance via permutation
 //! - Calibration analysis (ECE, MCE, temperature scaling)
 //! - Classification report (per-class precision, recall, F1)
+//! - Time series feature extraction (tsfresh-style)
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
@@ -15,6 +16,7 @@
 
 mod calibration;
 mod confusion;
+pub mod features;
 mod importance;
 mod report;
 mod top_losses;
@@ -24,6 +26,9 @@ pub use calibration::{
     CalibrationResult,
 };
 pub use confusion::{confusion_matrix, ConfusionMatrix};
+pub use features::{
+    extract_features, extract_multivariate_features, FeatureExtractor, FeatureSet,
+};
 pub use importance::{feature_importance, step_importance, PermutationImportance};
 pub use report::{classification_report, ClassMetrics, ClassificationReport};
 pub use top_losses::{top_losses, TopLoss};

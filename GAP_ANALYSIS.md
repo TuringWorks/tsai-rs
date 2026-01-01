@@ -398,7 +398,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | fastai integration | ✅ | ❌ | **N/A** | Python-specific |
 | sklearn pipelines | ✅ | ❌ | **GAP** | Could add similar |
 | sktime integration | ✅ | ❌ | **GAP** | ROCKET via sktime |
-| tsfresh integration | ✅ | ❌ | **GAP** | Feature extraction |
+| tsfresh integration | ✅ | ✅ | **FIT** | Native feature extraction (50+ features) |
 | Weights & Biases | ✅ | ⚠️ | **PARTIAL** | Feature flag exists |
 | Optuna HPO | ✅ | ❌ | **GAP** | Hyperparameter tuning |
 | PyTorch 2.0 | ✅ | ❌ | **N/A** | Different framework |

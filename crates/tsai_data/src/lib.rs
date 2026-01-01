@@ -35,6 +35,7 @@ mod io;
 mod loader;
 mod sampler;
 mod splits;
+pub mod tser;
 pub mod ucr;
 pub mod uea;
 
@@ -49,6 +50,7 @@ pub use splits::{
     SplitStrategy, TimeSplitterConfig, WalkForwardConfig, WalkForwardFold, WalkForwardIterator,
     WalkForwardSize,
 };
+pub use tser::{list_tser_datasets, TSERDataset, TSERDatasetInfo, TargetStats};
 pub use ucr::{list_datasets as list_ucr_datasets, UCRDataset, UCRDatasetInfo};
 pub use uea::{list_uea_datasets, UEADataset, UEADatasetInfo};
 

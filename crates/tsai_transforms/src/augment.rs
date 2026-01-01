@@ -6016,6 +6016,390 @@ impl<B: Backend> Transform<B> for InputDropout {
     }
 }
 
+/// Configuration for TSResize transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResizeConfig {
+    /// Target sequence length.
+    pub target_len: usize,
+}
+
+impl Default for ResizeConfig {
+    fn default() -> Self {
+        Self { target_len: 100 }
+    }
+}
+
+/// Resize transform for time series.
+///
+/// Resizes the time series to a target length using linear interpolation.
+pub struct Resize {
+    config: ResizeConfig,
+}
+
+impl Resize {
+    /// Create a new resize transform.
+    #[must_use]
+    pub fn new(target_len: usize) -> Self {
+        Self {
+            config: ResizeConfig { target_len },
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: ResizeConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl<B: Backend> Transform<B> for Resize {
+    fn apply(&self, batch: TSBatch<B>, _split: Split) -> Result<TSBatch<B>> {
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let target_len = self.config.target_len;
+        let device = batch.device();
+
+        if orig_len == target_len {
+            return Ok(batch);
+        }
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * target_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..target_len {
+                    // Map target position to source position
+                    let src_pos = t as f32 * (orig_len - 1) as f32 / (target_len - 1).max(1) as f32;
+                    let src_idx_low = (src_pos.floor() as usize).min(orig_len - 1);
+                    let src_idx_high = (src_idx_low + 1).min(orig_len - 1);
+                    let frac = src_pos - src_idx_low as f32;
+
+                    let low_val = x_values[b * n_vars * orig_len + v * orig_len + src_idx_low];
+                    let high_val = x_values[b * n_vars * orig_len + v * orig_len + src_idx_high];
+                    let interp_val = low_val * (1.0 - frac) + high_val * frac;
+
+                    result_values[b * n_vars * target_len + v * target_len + t] = interp_val;
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, target_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "Resize"
+    }
+}
+
+/// Configuration for TSRandomSize transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomSizeConfig {
+    /// Minimum size ratio (e.g., 0.5 = 50% of original).
+    pub min_ratio: f32,
+    /// Maximum size ratio (e.g., 1.5 = 150% of original).
+    pub max_ratio: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomSizeConfig {
+    fn default() -> Self {
+        Self {
+            min_ratio: 0.8,
+            max_ratio: 1.2,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random size transform for time series.
+///
+/// Randomly resizes the time series to a ratio of its original length,
+/// then resizes back to the original length.
+pub struct RandomSize {
+    config: RandomSizeConfig,
+    seed: Seed,
+}
+
+impl RandomSize {
+    /// Create a new random size transform.
+    #[must_use]
+    pub fn new(min_ratio: f32, max_ratio: f32) -> Self {
+        Self {
+            config: RandomSizeConfig {
+                min_ratio,
+                max_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomSizeConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate_to_len(values: &[f32], orig_len: usize, target_len: usize) -> Vec<f32> {
+        if orig_len == target_len {
+            return values.to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (orig_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(orig_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(orig_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomSize {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        // Random ratio for this batch
+        let ratio =
+            rng.gen::<f32>() * (self.config.max_ratio - self.config.min_ratio) + self.config.min_ratio;
+        let intermediate_len = ((orig_len as f32 * ratio) as usize).max(2);
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                // Extract this variable's series
+                let start = b * n_vars * orig_len + v * orig_len;
+                let series: Vec<f32> = x_values[start..start + orig_len].to_vec();
+
+                // Resize to intermediate length, then back to original
+                let intermediate = Self::interpolate_to_len(&series, orig_len, intermediate_len);
+                let final_series =
+                    Self::interpolate_to_len(&intermediate, intermediate_len, orig_len);
+
+                // Copy to result
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomSize"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for TSSelfDropout transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfDropoutConfig {
+    /// Dropout probability per time step.
+    pub drop_prob: f32,
+    /// Whether to use the previous value (true) or zero (false) for dropped steps.
+    pub use_prev_value: bool,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for SelfDropoutConfig {
+    fn default() -> Self {
+        Self {
+            drop_prob: 0.1,
+            use_prev_value: true,
+            p: 0.5,
+        }
+    }
+}
+
+/// Self-dropout transform for time series.
+///
+/// Randomly drops time steps and replaces them with either the previous
+/// value (self-referential) or zero.
+pub struct SelfDropout {
+    config: SelfDropoutConfig,
+    seed: Seed,
+}
+
+impl SelfDropout {
+    /// Create a new self-dropout transform.
+    #[must_use]
+    pub fn new(drop_prob: f32) -> Self {
+        Self {
+            config: SelfDropoutConfig {
+                drop_prob,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: SelfDropoutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set whether to use previous value.
+    #[must_use]
+    pub fn with_use_prev_value(mut self, use_prev: bool) -> Self {
+        self.config.use_prev_value = use_prev;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for SelfDropout {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = x_values.clone();
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let base_idx = b * n_vars * seq_len + v * seq_len;
+
+                for t in 1..seq_len {
+                    // Start from 1 since we need previous value
+                    if rng.gen::<f32>() < self.config.drop_prob {
+                        if self.config.use_prev_value {
+                            // Replace with previous time step value
+                            result_values[base_idx + t] = result_values[base_idx + t - 1];
+                        } else {
+                            // Replace with zero
+                            result_values[base_idx + t] = 0.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "SelfDropout"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

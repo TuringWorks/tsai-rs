@@ -603,6 +603,244 @@ impl Default for MaskedLossWrapper {
     }
 }
 
+/// Center Plus Loss: Combined Center Loss and Cross-Entropy Loss.
+///
+/// This loss function combines:
+/// 1. Cross-entropy loss for classification
+/// 2. Center loss for learning discriminative features
+///
+/// L = L_softmax + lambda * L_center
+///
+/// The lambda parameter controls the trade-off between classification
+/// accuracy (softmax) and feature discrimination (center).
+///
+/// Reference: "A Discriminative Feature Learning Approach for Deep Face Recognition"
+/// by Wen et al. (2016)
+#[derive(Debug)]
+pub struct CenterPlusLoss {
+    /// Center loss component.
+    center_loss: CenterLoss,
+    /// Weight for center loss relative to cross-entropy.
+    lambda: f32,
+}
+
+impl CenterPlusLoss {
+    /// Create a new Center Plus Loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_classes` - Number of classes
+    /// * `feature_dim` - Dimension of feature embeddings
+    /// * `lambda` - Weight for center loss (default: 0.003)
+    pub fn new(num_classes: usize, feature_dim: usize) -> Self {
+        Self {
+            center_loss: CenterLoss::new(num_classes, feature_dim),
+            lambda: 0.003,
+        }
+    }
+
+    /// Set the center loss weight.
+    #[must_use]
+    pub fn with_lambda(mut self, lambda: f32) -> Self {
+        self.lambda = lambda;
+        self
+    }
+
+    /// Set the center update learning rate.
+    #[must_use]
+    pub fn with_center_alpha(mut self, alpha: f32) -> Self {
+        self.center_loss = self.center_loss.with_alpha(alpha);
+        self
+    }
+
+    /// Compute combined center plus softmax loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `logits` - Raw model outputs for classification of shape (batch, n_classes)
+    /// * `features` - Feature embeddings of shape (batch, feature_dim)
+    /// * `targets` - Class labels of shape (batch,)
+    ///
+    /// # Returns
+    ///
+    /// Scalar loss tensor of shape (1,)
+    pub fn forward<B: Backend>(
+        &mut self,
+        logits: Tensor<B, 2>,
+        features: Tensor<B, 2>,
+        targets: Tensor<B, 1, Int>,
+    ) -> Tensor<B, 1> {
+        let device = logits.device();
+
+        // Compute cross-entropy loss
+        let ce_loss = CrossEntropyLossConfig::new()
+            .init(&device)
+            .forward(logits, targets.clone());
+        let ce_data: Vec<f32> = ce_loss.into_data().to_vec().unwrap();
+
+        // Compute center loss
+        let center_loss = self.center_loss.forward(features, targets);
+        let center_data: Vec<f32> = center_loss.into_data().to_vec().unwrap();
+
+        // Combined loss
+        let total_loss = ce_data[0] + self.lambda * center_data[0];
+        Tensor::<B, 1>::from_floats([total_loss], &device)
+    }
+
+    /// Get center loss component for separate center loss value.
+    pub fn get_center_loss(&self) -> &CenterLoss {
+        &self.center_loss
+    }
+
+    /// Get current class centers.
+    pub fn get_centers(&self) -> &Vec<Vec<f32>> {
+        self.center_loss.get_centers()
+    }
+
+    /// Reset centers to zeros.
+    pub fn reset_centers(&mut self) {
+        self.center_loss.reset_centers();
+    }
+}
+
+/// Tweedie Loss for compound Poisson distributions.
+///
+/// The Tweedie distribution is a family of distributions that includes
+/// Gaussian (p=0), Poisson (p=1), and Gamma (p=2) as special cases.
+/// It's particularly useful for modeling zero-inflated continuous data.
+///
+/// L = -y * exp((1-p)*log(mu)) / (1-p) + exp((2-p)*log(mu)) / (2-p)
+///
+/// Where:
+/// - y is the target
+/// - mu is the predicted mean (exp(log_mu) for numerical stability)
+/// - p is the Tweedie power parameter (typically 1 < p < 2)
+///
+/// Common applications:
+/// - Insurance claim amounts (zero-inflated)
+/// - Rainfall data
+/// - Revenue prediction with many zeros
+#[derive(Debug)]
+pub struct TweedieLoss {
+    /// Tweedie power parameter. 1 < p < 2 for compound Poisson.
+    pub power: f32,
+    /// Small epsilon for numerical stability.
+    epsilon: f32,
+}
+
+impl TweedieLoss {
+    /// Create a new Tweedie Loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `power` - Tweedie power parameter (typically 1.5)
+    ///   - 0: Gaussian
+    ///   - 1: Poisson
+    ///   - 1 < p < 2: Compound Poisson-Gamma
+    ///   - 2: Gamma
+    pub fn new(power: f32) -> Self {
+        Self {
+            power,
+            epsilon: 1e-8,
+        }
+    }
+
+    /// Compute Tweedie loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `preds` - Log predictions (log(mu)) of shape (batch, features)
+    /// * `targets` - Targets of shape (batch, features)
+    ///
+    /// # Returns
+    ///
+    /// Scalar loss tensor of shape (1,)
+    pub fn forward<B: Backend>(&self, preds: Tensor<B, 2>, targets: Tensor<B, 2>) -> Tensor<B, 1> {
+        let device = preds.device();
+
+        let preds_data: Vec<f32> = preds.into_data().to_vec().unwrap();
+        let targets_data: Vec<f32> = targets.into_data().to_vec().unwrap();
+
+        let p = self.power;
+        let one_minus_p = 1.0 - p;
+        let two_minus_p = 2.0 - p;
+
+        let mut total_loss = 0.0f32;
+        let n = preds_data.len();
+
+        for i in 0..n {
+            let log_mu = preds_data[i];
+            let y = targets_data[i].max(0.0); // Ensure non-negative
+
+            // mu = exp(log_mu) with clipping for stability
+            let mu = log_mu.exp().max(self.epsilon);
+
+            // Tweedie deviance:
+            // d = 2 * (y^(2-p)/((1-p)*(2-p)) - y*mu^(1-p)/(1-p) + mu^(2-p)/(2-p))
+            // Simplified negative log-likelihood form:
+            // L = -y * mu^(1-p) / (1-p) + mu^(2-p) / (2-p)
+
+            let term1 = if y > self.epsilon {
+                -y * mu.powf(one_minus_p) / one_minus_p
+            } else {
+                0.0
+            };
+
+            let term2 = mu.powf(two_minus_p) / two_minus_p;
+
+            total_loss += term1 + term2;
+        }
+
+        let mean_loss = total_loss / n as f32;
+        Tensor::<B, 1>::from_floats([mean_loss], &device)
+    }
+
+    /// Compute Tweedie deviance (alternative formulation).
+    ///
+    /// The deviance is a measure of goodness of fit:
+    /// D = 2 * sum(w * (y*g(y) - y*g(mu) - h(y) + h(mu)))
+    ///
+    /// where g and h depend on the power parameter.
+    pub fn deviance<B: Backend>(&self, preds: Tensor<B, 2>, targets: Tensor<B, 2>) -> Tensor<B, 1> {
+        let device = preds.device();
+
+        let preds_data: Vec<f32> = preds.into_data().to_vec().unwrap();
+        let targets_data: Vec<f32> = targets.into_data().to_vec().unwrap();
+
+        let p = self.power;
+
+        let mut total_dev = 0.0f32;
+        let n = preds_data.len();
+
+        for i in 0..n {
+            let log_mu = preds_data[i];
+            let y = targets_data[i].max(0.0);
+            let mu = log_mu.exp().max(self.epsilon);
+
+            // Unit deviance for Tweedie distribution
+            let dev = if y > self.epsilon {
+                let term1 = y.powf(2.0 - p) / ((1.0 - p) * (2.0 - p));
+                let term2 = y * mu.powf(1.0 - p) / (1.0 - p);
+                let term3 = mu.powf(2.0 - p) / (2.0 - p);
+                2.0 * (term1 - term2 + term3)
+            } else {
+                2.0 * mu.powf(2.0 - p) / (2.0 - p)
+            };
+
+            total_dev += dev;
+        }
+
+        let mean_dev = total_dev / n as f32;
+        Tensor::<B, 1>::from_floats([mean_dev], &device)
+    }
+}
+
+impl Default for TweedieLoss {
+    fn default() -> Self {
+        Self::new(1.5) // Compound Poisson-Gamma
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

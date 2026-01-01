@@ -18,7 +18,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Augmentation Transforms** | 40+ transforms | 46 transforms | **100%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
-| **Loss Functions** | 7+ custom losses | 8 losses | **100%** |
+| **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
 | **Callbacks** | 10+ callbacks | 10 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
@@ -248,8 +248,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | LabelSmoothingLoss | ✅ | ✅ | **FIT** | Label smoothing |
 | LogCoshLoss | ✅ | ✅ | **FIT** | Robust regression loss |
 | CenterLoss | ✅ | ✅ | **FIT** | Feature discrimination |
-| CenterPlusLoss | ✅ | ❌ | **GAP** | Combined center loss |
-| TweedieLoss | ✅ | ❌ | **GAP** | Probabilistic loss |
+| CenterPlusLoss | ✅ | ✅ | **FIT** | Combined center + softmax loss |
+| TweedieLoss | ✅ | ✅ | **FIT** | Compound Poisson loss |
 | MaskedLossWrapper | ✅ | ✅ | **FIT** | NaN handling |
 
 ### 5.2 Metrics
@@ -412,25 +412,21 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 1. **Training Infrastructure:**
    - WeightedPerSampleLoss callback
-   - CenterPlusLoss (combined center + softmax loss)
+   - RAdam/Ranger optimizers
 
 ### Medium Priority (Enhanced Functionality)
 
-2. **Training:**
-   - RAdam/Ranger optimizers
-   - TweedieLoss
-
-3. **Data:**
+2. **Data:**
    - UEA dataset auto-download
    - SlidingWindow
+   - TimeSplitter
 
 ### Low Priority (Advanced Features)
 
-4. **Data:**
+3. **Data:**
    - Walk-forward cross-validation
-   - TimeSplitter
 
-5. **Integration:**
+4. **Integration:**
    - tsfresh feature extraction
    - ONNX export
    - Optuna integration
@@ -498,7 +494,7 @@ The Rust implementation benefits from:
 2. Add ONNX export support
 3. Complete integrated gradients explainability
 4. Add WeightedPerSampleLoss callback
-5. Add CenterPlusLoss (combined center + softmax loss)
+5. Add RAdam/Ranger optimizers
 
 ---
 

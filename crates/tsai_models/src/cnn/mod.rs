@@ -9,6 +9,7 @@ mod resnet;
 mod tcn;
 mod xcm;
 mod xception;
+mod xresnet;
 
 pub use fcn::{ConvBlock, FCN, FCNConfig};
 pub use inception::{InceptionBlock, InceptionTimePlus, InceptionTimePlusConfig};
@@ -19,3 +20,4 @@ pub use resnet::{ResNetBlock, ResNetPlus, ResNetPlusConfig};
 pub use tcn::{TCN, TCNBlock, TCNBlockConfig, TCNConfig};
 pub use xcm::{XCMPlus, XCMPlusConfig};
 pub use xception::{SeparableConv1d, XceptionBlock, XceptionTime, XceptionTimeConfig};
+pub use xresnet::{XResNet1d, XResNet1dConfig};

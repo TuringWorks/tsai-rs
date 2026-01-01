@@ -14,8 +14,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 38 architectures | **95%** |
-| **Augmentation Transforms** | 40+ transforms | 35 transforms | **88%** |
+| **Models** | 40+ architectures | 39 architectures | **98%** |
+| **Augmentation Transforms** | 40+ transforms | 38 transforms | **95%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
 | **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
@@ -26,7 +26,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~95%**
+**Overall Feature Parity: ~97%**
 
 ---
 
@@ -100,13 +100,13 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | gMLP | ✅ | ✅ | **FIT** | Gated MLP with spatial gating |
 | TabModel | ✅ | ✅ | **FIT** | MLP-based tabular model |
 | MultiInputNet | ✅ | ❌ | **GAP** | Multi-modal |
-| XResNet1d | ✅ | ❌ | **GAP** | XResNet for 1D |
+| XResNet1d | ✅ | ✅ | **FIT** | XResNet18/34/50 with SE attention |
 
 ### Model Gap Summary
 
-- **Implemented:** 38 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, TabModel, MLP, LSTM, GRU)
-- **Missing:** 2+ models
-- **Priority Gaps:** MultiInputNet, XResNet1d
+- **Implemented:** 39 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, TabModel, MLP, XResNet1d, LSTM, GRU)
+- **Missing:** 1+ models
+- **Priority Gaps:** MultiInputNet
 
 ---
 
@@ -148,7 +148,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSRandomShift | ✅ | ✅ | **FIT** | Random shifting (RandomShift, TSRandomShift) |
 | TSHorizontalFlip | ✅ | ✅ | **FIT** | Time reversal (HorizontalFlip, TSHorizontalFlip) |
 | TSVerticalFlip | ✅ | ✅ | **FIT** | Value negation (TSVerticalFlip) |
-| TSTranslateX | ✅ | ❌ | **GAP** | X-axis translation |
+| TSTranslateX | ✅ | ✅ | **FIT** | Time axis translation/wrap |
 | Permutation | ✅ | ✅ | **FIT** | Segment permutation |
 | Rotation | ✅ | ✅ | **FIT** | Circular rotation |
 
@@ -169,7 +169,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
 | TSRandomResizedCrop | ✅ | ✅ | **FIT** | Random crop + resize with interpolation |
-| TSWindowSlicing | ✅ | ❌ | **GAP** | Window slicing |
+| TSWindowSlicing | ✅ | ✅ | **FIT** | Random window with resize |
 | TSRandomZoomOut | ✅ | ✅ | **FIT** | Shrink and center-pad |
 | TSRandomCropPad | ✅ | ✅ | **FIT** | Random crop with padding |
 
@@ -181,7 +181,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSTimeStepOut | ✅ | ✅ | **FIT** | Random time step dropout |
 | TSVarOut | ✅ | ✅ | **FIT** | Variable (channel) dropout |
 | TSMaskOut | ✅ | ✅ | **FIT** | Random scattered time step masking |
-| TSInputDropout | ✅ | ❌ | **GAP** | Input dropout |
+| TSInputDropout | ✅ | ✅ | **FIT** | Random input value dropout |
 | TSSelfDropout | ✅ | ❌ | **GAP** | Self-dropout |
 | FrequencyMask | ✅ | ✅ | **FIT** | SpecAugment frequency masking |
 | TimeMask | ✅ | ✅ | **FIT** | SpecAugment time masking |
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 35 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps)
-- **Missing:** 5+ transforms
-- **Priority Gaps:** Advanced resampling, TSTranslateX
+- **Implemented:** 38 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps, TranslateX, WindowSlicing, InputDropout)
+- **Missing:** 2+ transforms
+- **Priority Gaps:** TSSelfDropout, advanced resampling
 
 ---
 

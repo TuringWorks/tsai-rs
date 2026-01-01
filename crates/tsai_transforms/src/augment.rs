@@ -5533,6 +5533,489 @@ impl<B: Backend> Transform<B> for ShuffleSteps {
     }
 }
 
+// =============================================================================
+// TSTranslateX: Translate along time axis
+// =============================================================================
+
+/// Configuration for time translation augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslateXConfig {
+    /// Maximum translation as fraction of sequence length (0.0-1.0).
+    pub max_translate: f32,
+    /// Fill value for empty regions after translation.
+    pub fill_value: f32,
+    /// Whether to wrap around (circular shift) instead of filling.
+    pub wrap: bool,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for TranslateXConfig {
+    fn default() -> Self {
+        Self {
+            max_translate: 0.2,
+            fill_value: 0.0,
+            wrap: false,
+            p: 0.5,
+        }
+    }
+}
+
+/// Time axis translation augmentation.
+///
+/// Translates the time series along the time axis, either filling
+/// empty regions with a constant or wrapping around.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::TranslateX;
+///
+/// // Translate up to 20% of sequence length, fill with 0
+/// let transform = TranslateX::new(0.2);
+///
+/// // Translate with wrap-around (circular shift)
+/// let transform = TranslateX::new(0.3).with_wrap(true);
+/// ```
+pub struct TranslateX {
+    config: TranslateXConfig,
+    seed: Seed,
+}
+
+impl TranslateX {
+    /// Create a new time translation transform.
+    #[must_use]
+    pub fn new(max_translate: f32) -> Self {
+        Self {
+            config: TranslateXConfig {
+                max_translate,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: TranslateXConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set fill value.
+    #[must_use]
+    pub fn with_fill_value(mut self, value: f32) -> Self {
+        self.config.fill_value = value;
+        self
+    }
+
+    /// Enable wrap-around mode.
+    #[must_use]
+    pub fn with_wrap(mut self, wrap: bool) -> Self {
+        self.config.wrap = wrap;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for TranslateX {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Random translation amount
+        let max_shift = (seq_len as f32 * self.config.max_translate) as i32;
+        let shift = rng.gen_range(-max_shift..=max_shift);
+
+        if shift == 0 {
+            return Ok(batch);
+        }
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![self.config.fill_value; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    let src_t = if self.config.wrap {
+                        // Wrap around
+                        ((t as i32 - shift).rem_euclid(seq_len as i32)) as usize
+                    } else {
+                        let new_t = t as i32 - shift;
+                        if new_t >= 0 && new_t < seq_len as i32 {
+                            new_t as usize
+                        } else {
+                            continue; // Leave as fill value
+                        }
+                    };
+
+                    let src_idx = b * n_vars * seq_len + v * seq_len + src_t;
+                    let dst_idx = b * n_vars * seq_len + v * seq_len + t;
+                    result_values[dst_idx] = x_values[src_idx];
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "TranslateX"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSWindowSlicing: Extract random window slices
+// =============================================================================
+
+/// Configuration for window slicing augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowSlicingConfig {
+    /// Window size as fraction of sequence length (0.0-1.0).
+    pub window_ratio: f32,
+    /// Whether to resize back to original length.
+    pub resize: bool,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for WindowSlicingConfig {
+    fn default() -> Self {
+        Self {
+            window_ratio: 0.9,
+            resize: true,
+            p: 0.5,
+        }
+    }
+}
+
+/// Window slicing augmentation.
+///
+/// Extracts a random window from the time series, optionally
+/// resizing back to the original length.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::WindowSlicing;
+///
+/// // Extract 90% window and resize back
+/// let transform = WindowSlicing::new(0.9);
+///
+/// // Extract 80% window without resizing
+/// let transform = WindowSlicing::new(0.8).with_resize(false);
+/// ```
+pub struct WindowSlicing {
+    config: WindowSlicingConfig,
+    seed: Seed,
+}
+
+impl WindowSlicing {
+    /// Create a new window slicing transform.
+    #[must_use]
+    pub fn new(window_ratio: f32) -> Self {
+        Self {
+            config: WindowSlicingConfig {
+                window_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: WindowSlicingConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set whether to resize back to original length.
+    #[must_use]
+    pub fn with_resize(mut self, resize: bool) -> Self {
+        self.config.resize = resize;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for WindowSlicing {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let window_len = ((seq_len as f32 * self.config.window_ratio) as usize).max(1);
+        let max_start = seq_len.saturating_sub(window_len);
+        let start = if max_start > 0 {
+            rng.gen_range(0..=max_start)
+        } else {
+            0
+        };
+
+        let x = batch.x.into_inner();
+
+        if self.config.resize && window_len != seq_len {
+            // Extract window and resize using linear interpolation
+            let x_data = x.to_data();
+            let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+            let mut result_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+            for b in 0..batch_size {
+                for v in 0..n_vars {
+                    for t in 0..seq_len {
+                        // Map output position to window position
+                        let src_t = t as f32 * (window_len - 1) as f32 / (seq_len - 1).max(1) as f32;
+                        let t0 = src_t.floor() as usize;
+                        let t1 = (t0 + 1).min(window_len - 1);
+                        let frac = src_t - t0 as f32;
+
+                        let src_idx0 = b * n_vars * seq_len + v * seq_len + (start + t0);
+                        let src_idx1 = b * n_vars * seq_len + v * seq_len + (start + t1);
+                        let dst_idx = b * n_vars * seq_len + v * seq_len + t;
+
+                        if src_idx0 < x_values.len() && src_idx1 < x_values.len() {
+                            result_values[dst_idx] = x_values[src_idx0] * (1.0 - frac) + x_values[src_idx1] * frac;
+                        }
+                    }
+                }
+            }
+
+            let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+            Ok(TSBatch {
+                x: TSTensor::new(result)?,
+                y: batch.y,
+                mask: batch.mask,
+            })
+        } else {
+            // Just slice without resizing
+            let sliced = x.slice([0..batch_size, 0..n_vars, start..start + window_len]);
+
+            Ok(TSBatch {
+                x: TSTensor::new(sliced)?,
+                y: batch.y,
+                mask: batch.mask,
+            })
+        }
+    }
+
+    fn name(&self) -> &str {
+        "WindowSlicing"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSInputDropout: Random input feature dropout
+// =============================================================================
+
+/// Configuration for input dropout augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputDropoutConfig {
+    /// Probability of dropping each input value.
+    pub drop_prob: f32,
+    /// Value to replace dropped inputs with.
+    pub fill_value: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for InputDropoutConfig {
+    fn default() -> Self {
+        Self {
+            drop_prob: 0.1,
+            fill_value: 0.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Input dropout augmentation.
+///
+/// Randomly drops individual input values across all dimensions.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::InputDropout;
+///
+/// // Drop 10% of inputs, fill with 0
+/// let transform = InputDropout::new(0.1);
+/// ```
+pub struct InputDropout {
+    config: InputDropoutConfig,
+    seed: Seed,
+}
+
+impl InputDropout {
+    /// Create a new input dropout transform.
+    #[must_use]
+    pub fn new(drop_prob: f32) -> Self {
+        Self {
+            config: InputDropoutConfig {
+                drop_prob,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: InputDropoutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set fill value.
+    #[must_use]
+    pub fn with_fill_value(mut self, value: f32) -> Self {
+        self.config.fill_value = value;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for InputDropout {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = x_values.clone();
+        let total_elements = batch_size * n_vars * seq_len;
+
+        for i in 0..total_elements {
+            if rng.gen::<f32>() < self.config.drop_prob {
+                result_values[i] = self.config.fill_value;
+            }
+        }
+
+        let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "InputDropout"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -335,7 +335,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSDataLoaders | ✅ | ✅ | **FIT** | Paired loaders |
 | Random split | ✅ | ✅ | **FIT** | train_test_split |
 | Stratified split | ✅ | ✅ | **FIT** | StratifiedSampler |
-| Walk-forward CV | ✅ | ❌ | **GAP** | Time series CV |
+| Walk-forward CV | ✅ | ✅ | **FIT** | Time series CV with expanding/sliding window |
 | SlidingWindow | ✅ | ✅ | **FIT** | Window creation with configurable stride/horizon |
 | TimeSplitter | ✅ | ✅ | **FIT** | Time-based split preserving temporal order |
 
@@ -418,7 +418,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 2. **Data:**
    - UEA dataset auto-download
-   - Walk-forward cross-validation
+   - More external datasets (regression, forecasting)
 
 ### Low Priority (Advanced Features)
 

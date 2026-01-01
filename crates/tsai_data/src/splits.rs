@@ -459,6 +459,246 @@ pub fn train_valid_test_split(
     Ok((train, valid, test))
 }
 
+/// Configuration for Walk-forward cross-validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalkForwardConfig {
+    /// Number of folds.
+    pub n_folds: usize,
+    /// Whether to use expanding window (true) or sliding window (false).
+    pub expanding: bool,
+    /// Minimum training size (as fraction or absolute count).
+    pub min_train_size: WalkForwardSize,
+    /// Test size for each fold (as fraction or absolute count).
+    pub test_size: WalkForwardSize,
+    /// Gap between train and test sets.
+    pub gap: usize,
+}
+
+/// Size specification for walk-forward splits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WalkForwardSize {
+    /// Fraction of total data.
+    Fraction(f32),
+    /// Absolute number of samples.
+    Absolute(usize),
+}
+
+impl Default for WalkForwardConfig {
+    fn default() -> Self {
+        Self {
+            n_folds: 5,
+            expanding: true,
+            min_train_size: WalkForwardSize::Fraction(0.2),
+            test_size: WalkForwardSize::Fraction(0.1),
+            gap: 0,
+        }
+    }
+}
+
+impl WalkForwardConfig {
+    /// Create a new walk-forward configuration.
+    pub fn new(n_folds: usize) -> Self {
+        Self {
+            n_folds,
+            ..Default::default()
+        }
+    }
+
+    /// Set whether to use expanding or sliding window.
+    #[must_use]
+    pub fn with_expanding(mut self, expanding: bool) -> Self {
+        self.expanding = expanding;
+        self
+    }
+
+    /// Set minimum training size.
+    #[must_use]
+    pub fn with_min_train_size(mut self, size: WalkForwardSize) -> Self {
+        self.min_train_size = size;
+        self
+    }
+
+    /// Set test size.
+    #[must_use]
+    pub fn with_test_size(mut self, size: WalkForwardSize) -> Self {
+        self.test_size = size;
+        self
+    }
+
+    /// Set gap between train and test.
+    #[must_use]
+    pub fn with_gap(mut self, gap: usize) -> Self {
+        self.gap = gap;
+        self
+    }
+}
+
+/// A single fold from walk-forward cross-validation.
+#[derive(Debug, Clone)]
+pub struct WalkForwardFold {
+    /// Fold index (0-based).
+    pub fold_idx: usize,
+    /// Training indices.
+    pub train_indices: Vec<usize>,
+    /// Test indices.
+    pub test_indices: Vec<usize>,
+}
+
+/// Walk-forward cross-validation for time series.
+///
+/// This is a time-series aware cross-validation strategy that:
+/// - Never uses future data to predict the past
+/// - Trains on historical data and tests on future data
+/// - Supports both expanding window and sliding window modes
+///
+/// ## Expanding Window Mode
+/// Each fold uses all data from start up to fold boundary:
+/// - Fold 1: Train [0, t1), Test [t1, t2)
+/// - Fold 2: Train [0, t2), Test [t2, t3)
+/// - Fold 3: Train [0, t3), Test [t3, t4)
+///
+/// ## Sliding Window Mode
+/// Each fold uses a fixed-size training window:
+/// - Fold 1: Train [s1, t1), Test [t1, t2)
+/// - Fold 2: Train [s2, t2), Test [t2, t3)
+/// - Fold 3: Train [s3, t3), Test [t3, t4)
+///
+/// # Arguments
+///
+/// * `n` - Total number of samples
+/// * `config` - Walk-forward configuration
+///
+/// # Returns
+///
+/// Vector of WalkForwardFold structs containing train/test indices for each fold.
+pub fn walk_forward_split(n: usize, config: &WalkForwardConfig) -> Result<Vec<WalkForwardFold>> {
+    if config.n_folds < 2 {
+        return Err(DataError::SplitError(
+            "n_folds must be at least 2".to_string(),
+        ));
+    }
+
+    // Calculate sizes
+    let min_train = match config.min_train_size {
+        WalkForwardSize::Fraction(f) => ((n as f32) * f).round() as usize,
+        WalkForwardSize::Absolute(s) => s,
+    };
+
+    let test_size = match config.test_size {
+        WalkForwardSize::Fraction(f) => ((n as f32) * f).round() as usize,
+        WalkForwardSize::Absolute(s) => s,
+    };
+
+    let min_train = min_train.max(1);
+    let test_size = test_size.max(1);
+
+    // Calculate total required space
+    let required = min_train + config.gap + (config.n_folds * test_size);
+    if required > n {
+        return Err(DataError::SplitError(format!(
+            "Not enough samples: {} available, but need at least {} for {} folds",
+            n, required, config.n_folds
+        )));
+    }
+
+    // Calculate available space for folds after minimum training
+    let available = n - min_train - config.gap;
+    let fold_step = available / config.n_folds;
+
+    if fold_step < test_size {
+        return Err(DataError::SplitError(format!(
+            "Fold step {} is smaller than test_size {}",
+            fold_step, test_size
+        )));
+    }
+
+    let mut folds = Vec::with_capacity(config.n_folds);
+
+    for fold_idx in 0..config.n_folds {
+        // Test window position
+        let test_start = min_train + config.gap + (fold_idx * fold_step);
+        let test_end = (test_start + test_size).min(n);
+
+        // Training window
+        let train_end = test_start - config.gap;
+        let train_start = if config.expanding {
+            0
+        } else {
+            // Sliding window: maintain min_train size
+            if train_end > min_train {
+                train_end - min_train
+            } else {
+                0
+            }
+        };
+
+        let train_indices: Vec<usize> = (train_start..train_end).collect();
+        let test_indices: Vec<usize> = (test_start..test_end).collect();
+
+        folds.push(WalkForwardFold {
+            fold_idx,
+            train_indices,
+            test_indices,
+        });
+    }
+
+    Ok(folds)
+}
+
+/// Create walk-forward splits from a dataset.
+///
+/// Convenience function that creates dataset subsets for each fold.
+pub fn walk_forward_split_dataset(
+    dataset: &TSDataset,
+    config: &WalkForwardConfig,
+) -> Result<Vec<(TSDataset, TSDataset)>> {
+    let n = dataset.len();
+    let folds = walk_forward_split(n, config)?;
+
+    let mut result = Vec::with_capacity(folds.len());
+    for fold in folds {
+        let train = dataset.subset(&fold.train_indices)?;
+        let test = dataset.subset(&fold.test_indices)?;
+        result.push((train, test));
+    }
+
+    Ok(result)
+}
+
+/// Iterator over walk-forward folds.
+pub struct WalkForwardIterator {
+    folds: Vec<WalkForwardFold>,
+    current: usize,
+}
+
+impl WalkForwardIterator {
+    /// Create a new walk-forward iterator.
+    pub fn new(n: usize, config: &WalkForwardConfig) -> Result<Self> {
+        let folds = walk_forward_split(n, config)?;
+        Ok(Self { folds, current: 0 })
+    }
+}
+
+impl Iterator for WalkForwardIterator {
+    type Item = WalkForwardFold;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < self.folds.len() {
+            let fold = self.folds[self.current].clone();
+            self.current += 1;
+            Some(fold)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for WalkForwardIterator {
+    fn len(&self) -> usize {
+        self.folds.len() - self.current
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

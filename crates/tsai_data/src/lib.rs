@@ -44,7 +44,9 @@ pub use loader::{TSDataLoader, TSDataLoaderBuilder, TSDataLoaders, TSDataLoaders
 pub use sampler::{RandomSampler, SequentialSampler, StratifiedSampler};
 pub use splits::{
     sliding_window, sliding_window_batch, time_split, time_split_indices, train_test_split,
-    train_valid_test_split, SlidingWindowConfig, SplitStrategy, TimeSplitterConfig,
+    train_valid_test_split, walk_forward_split, walk_forward_split_dataset, SlidingWindowConfig,
+    SplitStrategy, TimeSplitterConfig, WalkForwardConfig, WalkForwardFold, WalkForwardIterator,
+    WalkForwardSize,
 };
 pub use ucr::{list_datasets as list_ucr_datasets, UCRDataset, UCRDatasetInfo};
 

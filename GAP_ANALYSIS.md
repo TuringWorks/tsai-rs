@@ -22,7 +22,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
 | **Callbacks** | 10+ callbacks | 14 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
-| **Data I/O** | Multiple formats | 4 formats + TSER | **85%** |
+| **Data I/O** | Multiple formats | 4 formats + datasets | **90%** |
 | **Analysis Tools** | 5+ tools | 6 tools | **100%** |
 | **Explainability** | Full suite | Full suite | **100%** |
 
@@ -346,7 +346,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | UCR datasets (158) | ✅ | ✅ | **FIT** | Auto-download from timeseriesclassification.com |
 | UEA datasets (30) | ✅ | ✅ | **FIT** | 30 multivariate datasets with auto-download |
 | Regression datasets (19) | ✅ | ✅ | **FIT** | TSER Archive auto-download, 19 datasets |
-| Forecasting datasets (62) | ✅ | ❌ | **GAP** | External data |
+| Forecasting datasets (48) | ✅ | ✅ | **FIT** | Monash Forecasting Archive auto-download |
 | Cache management | ✅ | ✅ | **FIT** | cache_dir() |
 
 ---

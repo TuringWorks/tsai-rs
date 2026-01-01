@@ -31,6 +31,7 @@
 
 mod dataset;
 mod error;
+pub mod forecasting;
 mod io;
 mod loader;
 mod sampler;
@@ -49,6 +50,9 @@ pub use splits::{
     train_valid_test_split, walk_forward_split, walk_forward_split_dataset, SlidingWindowConfig,
     SplitStrategy, TimeSplitterConfig, WalkForwardConfig, WalkForwardFold, WalkForwardIterator,
     WalkForwardSize,
+};
+pub use forecasting::{
+    list_forecasting_datasets, ForecastingDataset, ForecastingDatasetInfo, Frequency, TimeSeries,
 };
 pub use tser::{list_tser_datasets, TSERDataset, TSERDatasetInfo, TargetStats};
 pub use ucr::{list_datasets as list_ucr_datasets, UCRDataset, UCRDatasetInfo};

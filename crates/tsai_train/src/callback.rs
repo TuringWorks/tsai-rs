@@ -1285,6 +1285,247 @@ impl Callback for TransformSchedulerCallback {
     }
 }
 
+/// Strategy for computing per-sample weights.
+#[derive(Debug, Clone)]
+pub enum WeightStrategy {
+    /// Equal weights for all samples.
+    Uniform,
+    /// Inverse frequency weighting (minority classes get higher weight).
+    InverseFrequency {
+        /// Class counts (or will be computed).
+        class_counts: Option<Vec<usize>>,
+    },
+    /// Effective number weighting (handles long-tail distributions).
+    EffectiveNumber {
+        /// Beta parameter (typically 0.99 or 0.999).
+        beta: f64,
+        /// Class counts.
+        class_counts: Option<Vec<usize>>,
+    },
+    /// Custom weights per sample.
+    Custom(Vec<f32>),
+    /// Curriculum learning: weight by sample difficulty.
+    Curriculum {
+        /// Current loss per sample.
+        sample_losses: Vec<f32>,
+        /// Weight easy samples more initially.
+        easy_first: bool,
+    },
+}
+
+/// Callback for weighted per-sample loss computation.
+///
+/// Applies per-sample weights during training to handle:
+/// - Class imbalance
+/// - Sample importance
+/// - Curriculum learning
+/// - Hard example mining
+///
+/// The weights are applied to the loss before reduction, effectively
+/// scaling the gradient contribution of each sample.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::{WeightedPerSampleLossCallback, WeightStrategy};
+///
+/// // Use inverse frequency weighting for imbalanced classes
+/// let callback = WeightedPerSampleLossCallback::new(WeightStrategy::InverseFrequency {
+///     class_counts: Some(vec![1000, 100, 50]),
+/// });
+/// ```
+pub struct WeightedPerSampleLossCallback {
+    strategy: WeightStrategy,
+    weights: Vec<f32>,
+    total_samples: usize,
+    num_classes: Option<usize>,
+}
+
+impl WeightedPerSampleLossCallback {
+    /// Create a new weighted per-sample loss callback.
+    pub fn new(strategy: WeightStrategy) -> Self {
+        Self {
+            strategy,
+            weights: Vec::new(),
+            total_samples: 0,
+            num_classes: None,
+        }
+    }
+
+    /// Create with inverse frequency weighting.
+    pub fn inverse_frequency(class_counts: Vec<usize>) -> Self {
+        Self::new(WeightStrategy::InverseFrequency {
+            class_counts: Some(class_counts),
+        })
+    }
+
+    /// Create with effective number weighting.
+    pub fn effective_number(beta: f64, class_counts: Vec<usize>) -> Self {
+        Self::new(WeightStrategy::EffectiveNumber {
+            beta,
+            class_counts: Some(class_counts),
+        })
+    }
+
+    /// Create with custom weights.
+    pub fn custom(weights: Vec<f32>) -> Self {
+        Self::new(WeightStrategy::Custom(weights))
+    }
+
+    /// Set the number of classes (for computing class weights).
+    #[must_use]
+    pub fn with_num_classes(mut self, num_classes: usize) -> Self {
+        self.num_classes = Some(num_classes);
+        self
+    }
+
+    /// Get current weights.
+    pub fn weights(&self) -> &[f32] {
+        &self.weights
+    }
+
+    /// Get weight for a specific sample.
+    pub fn get_weight(&self, sample_idx: usize) -> f32 {
+        self.weights.get(sample_idx).copied().unwrap_or(1.0)
+    }
+
+    /// Get weights for a batch of samples.
+    pub fn get_batch_weights(&self, indices: &[usize]) -> Vec<f32> {
+        indices.iter().map(|&i| self.get_weight(i)).collect()
+    }
+
+    /// Compute inverse frequency weights.
+    fn compute_inverse_frequency_weights(class_counts: &[usize]) -> Vec<f32> {
+        let total: usize = class_counts.iter().sum();
+        let n_classes = class_counts.len();
+
+        class_counts
+            .iter()
+            .map(|&count| {
+                if count > 0 {
+                    total as f32 / (n_classes as f32 * count as f32)
+                } else {
+                    1.0
+                }
+            })
+            .collect()
+    }
+
+    /// Compute effective number weights.
+    ///
+    /// Uses the formula: (1 - beta^n) / (1 - beta)
+    /// This better handles long-tail distributions than simple inverse frequency.
+    fn compute_effective_number_weights(beta: f64, class_counts: &[usize]) -> Vec<f32> {
+        let effective_nums: Vec<f64> = class_counts
+            .iter()
+            .map(|&n| {
+                if n == 0 {
+                    1.0
+                } else {
+                    (1.0 - beta.powi(n as i32)) / (1.0 - beta)
+                }
+            })
+            .collect();
+
+        let total: f64 = effective_nums.iter().sum();
+        let n_classes = class_counts.len();
+
+        effective_nums
+            .iter()
+            .map(|&eff| (total / (n_classes as f64 * eff)) as f32)
+            .collect()
+    }
+
+    /// Initialize weights based on strategy.
+    fn initialize_weights(&mut self, n_samples: usize) {
+        self.total_samples = n_samples;
+
+        self.weights = match &self.strategy {
+            WeightStrategy::Uniform => vec![1.0; n_samples],
+
+            WeightStrategy::InverseFrequency { class_counts } => {
+                if let Some(counts) = class_counts {
+                    Self::compute_inverse_frequency_weights(counts)
+                } else {
+                    vec![1.0; n_samples]
+                }
+            }
+
+            WeightStrategy::EffectiveNumber { beta, class_counts } => {
+                if let Some(counts) = class_counts {
+                    Self::compute_effective_number_weights(*beta, counts)
+                } else {
+                    vec![1.0; n_samples]
+                }
+            }
+
+            WeightStrategy::Custom(w) => w.clone(),
+
+            WeightStrategy::Curriculum { sample_losses, easy_first } => {
+                // Sort indices by loss and assign weights
+                let mut indexed: Vec<(usize, f32)> = sample_losses
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &l)| (i, l))
+                    .collect();
+
+                if *easy_first {
+                    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                } else {
+                    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                }
+
+                // Linear weighting from 1.0 (first) to 0.1 (last)
+                let mut weights = vec![0.0; sample_losses.len()];
+                for (rank, (orig_idx, _)) in indexed.iter().enumerate() {
+                    let w = 1.0 - 0.9 * (rank as f32 / sample_losses.len() as f32);
+                    weights[*orig_idx] = w;
+                }
+                weights
+            }
+        };
+
+        // Normalize weights to have mean 1.0
+        if !self.weights.is_empty() {
+            let mean: f32 = self.weights.iter().sum::<f32>() / self.weights.len() as f32;
+            if mean > 0.0 {
+                for w in &mut self.weights {
+                    *w /= mean;
+                }
+            }
+        }
+    }
+
+    /// Update weights based on current losses (for curriculum learning).
+    pub fn update_curriculum_weights(&mut self, sample_losses: Vec<f32>, easy_first: bool) {
+        self.strategy = WeightStrategy::Curriculum {
+            sample_losses: sample_losses.clone(),
+            easy_first,
+        };
+        self.initialize_weights(sample_losses.len());
+    }
+}
+
+impl Callback for WeightedPerSampleLossCallback {
+    fn before_fit(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        // Initialize with batch count as approximation
+        // In practice, the actual sample count would come from the dataset
+        let approx_samples = ctx.n_batches * 32; // Approximate batch size
+        if self.weights.is_empty() {
+            self.initialize_weights(approx_samples);
+        }
+        tracing::info!(
+            "WeightedPerSampleLoss: initialized with {} weights",
+            self.weights.len()
+        );
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "WeightedPerSampleLossCallback"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

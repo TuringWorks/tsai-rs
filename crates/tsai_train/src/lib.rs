@@ -36,6 +36,7 @@ pub mod evaluation;
 pub mod learner;
 pub mod losses;
 pub mod metrics;
+pub mod optimizer;
 pub mod scheduler;
 pub mod training;
 
@@ -43,11 +44,12 @@ pub use callback::{
     Callback, CallbackContext, CallbackList, CheckpointMetadata, EarlyStoppingCallback,
     GradientClipCallback, GradientClipMode, HistoryCallback, MixedPrecisionCallback,
     ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback, TerminateOnNanCallback,
-    TransformSchedule, TransformSchedulerCallback,
+    TransformSchedule, TransformSchedulerCallback, WeightedPerSampleLossCallback, WeightStrategy,
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};
 pub use losses::{CrossEntropyLoss, FocalLoss, HuberLoss, LabelSmoothingLoss, LogCoshLoss, MSELoss};
+pub use optimizer::{RAdam, RAdamConfig, Ranger, RangerConfig};
 pub use metrics::{Accuracy, F1Score, Metric, Precision, Recall, AUC, MCC, MAE, MAPE, MSE, RMSE};
 pub use scheduler::{
     ConstantLR, CosineAnnealingLR, CosineAnnealingWarmRestarts, ExponentialLR, LinearWarmup,

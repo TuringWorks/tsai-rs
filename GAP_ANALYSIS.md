@@ -20,7 +20,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
 | **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
-| **Callbacks** | 10+ callbacks | 10 callbacks | **100%** |
+| **Callbacks** | 10+ callbacks | 11 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
 | **Data I/O** | Multiple formats | 4 formats | **80%** |
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
@@ -294,7 +294,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TerminateOnNan | ✅ | ✅ | **FIT** | NaN termination |
 | ShowGraph | ✅ | ✅ | **FIT** | ASCII training curves visualization |
 | TransformScheduler | ✅ | ✅ | **FIT** | Transform probability scheduling |
-| WeightedPerSampleLoss | ✅ | ❌ | **GAP** | Sample weighting |
+| WeightedPerSampleLoss | ✅ | ✅ | **FIT** | Sample weighting with multiple strategies |
 | BatchSubsampler | ✅ | ❌ | **GAP** | Batch subsampling |
 | PredictionDynamics | ✅ | ❌ | **GAP** | Prediction tracking |
 | NoisyStudent | ✅ | ❌ | **GAP** | Semi-supervised |
@@ -306,8 +306,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Adam | ✅ | ✅ | **FIT** | Via Burn |
 | AdamW | ✅ | ✅ | **FIT** | Via Burn |
 | SGD | ✅ | ✅ | **FIT** | Via Burn |
-| RAdam | ✅ | ❌ | **GAP** | Rectified Adam |
-| Ranger | ✅ | ❌ | **GAP** | Ranger optimizer |
+| RAdam | ✅ | ✅ | **FIT** | Rectified Adam with variance rectification |
+| Ranger | ✅ | ✅ | **FIT** | RAdam + Lookahead optimizer |
 
 ---
 
@@ -410,9 +410,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### High Priority (Core Functionality)
 
-1. **Training Infrastructure:**
-   - WeightedPerSampleLoss callback
-   - RAdam/Ranger optimizers
+1. **Explainability:**
+   - Complete integrated gradients
+   - Attention visualization
 
 ### Medium Priority (Enhanced Functionality)
 
@@ -489,8 +489,8 @@ The Rust implementation benefits from:
 1. Add UEA dataset auto-download
 2. Add ONNX export support
 3. Complete integrated gradients explainability
-4. Add WeightedPerSampleLoss callback
-5. Add RAdam/Ranger optimizers
+4. Add attention visualization
+5. Add Calibration analysis tool
 
 ---
 

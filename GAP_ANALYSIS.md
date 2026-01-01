@@ -14,7 +14,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 41 architectures | **100%** |
+| **Models** | 40+ architectures | 42 architectures | **100%** |
 | **Augmentation Transforms** | 40+ transforms | 47 transforms | **100%** |
 | **Label Mixing** | 4 transforms | 4 transforms | **100%** |
 | **Imaging Transforms** | 7 transforms | 7 transforms | **100%** |
@@ -50,7 +50,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Model | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-------|---------------|----------------|--------|-------|
-| TransformerModel | ✅ | ❌ | **GAP** | Base Transformer |
+| TransformerModel | ✅ | ✅ | **FIT** | Base Transformer with pre/post norm, learnable/sinusoidal PE |
 | TST/TSTPlus | ✅ | ✅ | **FIT** | Time Series Transformer |
 | TSiT/TSiTPlus | ✅ | ✅ | **FIT** | Vision Transformer adaptation |
 | PatchTST | ✅ | ✅ | **FIT** | ICLR 2023 model |
@@ -104,9 +104,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Model Gap Summary
 
-- **Implemented:** 41 models (InceptionTimePlus, ResNetPlus, ResCNN, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, TabModel, MLP, XResNet1d, MultiInputNet, LSTM, GRU)
+- **Implemented:** 42 models (InceptionTimePlus, ResNetPlus, ResCNN, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TransformerModel, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, TabModel, MLP, XResNet1d, MultiInputNet, LSTM, GRU)
 - **All major models implemented**
-- **Priority Gaps:** None (base TransformerModel could be added)
+- **Priority Gaps:** None
 
 ---
 

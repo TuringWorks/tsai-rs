@@ -207,7 +207,7 @@ impl<B: Backend> ResCNN<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burn::backend::NdArray;
+    use burn_ndarray::NdArray;
 
     type TestBackend = NdArray<f32>;
 

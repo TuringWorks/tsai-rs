@@ -43,6 +43,7 @@ pub use callback::{
     Callback, CallbackContext, CallbackList, CheckpointMetadata, EarlyStoppingCallback,
     GradientClipCallback, GradientClipMode, HistoryCallback, MixedPrecisionCallback,
     ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback, TerminateOnNanCallback,
+    TransformSchedule, TransformSchedulerCallback,
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};

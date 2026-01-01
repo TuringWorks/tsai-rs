@@ -1089,6 +1089,202 @@ impl Callback for ShowGraphCallback {
     }
 }
 
+/// Transform schedule type for controlling when augmentations are applied.
+#[derive(Debug, Clone)]
+pub enum TransformSchedule {
+    /// Fixed probability throughout training.
+    Constant(f32),
+    /// Linear warmup from 0 to max probability over n epochs.
+    LinearWarmup {
+        /// Max probability to reach.
+        max_p: f32,
+        /// Number of warmup epochs.
+        warmup_epochs: usize,
+    },
+    /// Linear cooldown from max to 0 over last n epochs.
+    LinearCooldown {
+        /// Starting probability.
+        max_p: f32,
+        /// Number of cooldown epochs.
+        cooldown_epochs: usize,
+    },
+    /// Cosine annealing between min and max probability.
+    CosineAnnealing {
+        /// Minimum probability.
+        min_p: f32,
+        /// Maximum probability.
+        max_p: f32,
+    },
+    /// Step-wise schedule: probability changes at specific epochs.
+    Step {
+        /// List of (epoch, probability) pairs.
+        schedule: Vec<(usize, f32)>,
+    },
+    /// Start augmentation only after a certain epoch.
+    DelayedStart {
+        /// Probability after start.
+        p: f32,
+        /// Epoch to start at.
+        start_epoch: usize,
+    },
+}
+
+/// Callback for scheduling transform/augmentation probabilities during training.
+///
+/// This callback adjusts the probability of data augmentation transforms
+/// based on the current epoch, following a specified schedule.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::{TransformSchedulerCallback, TransformSchedule};
+///
+/// // Start at 0 probability and warm up to 0.8 over 5 epochs
+/// let callback = TransformSchedulerCallback::new("GaussianNoise", TransformSchedule::LinearWarmup {
+///     max_p: 0.8,
+///     warmup_epochs: 5,
+/// });
+///
+/// // Or use delayed start
+/// let callback = TransformSchedulerCallback::new("CutOut", TransformSchedule::DelayedStart {
+///     p: 0.5,
+///     start_epoch: 10,
+/// });
+/// ```
+pub struct TransformSchedulerCallback {
+    /// Name of the transform being scheduled.
+    transform_name: String,
+    /// The schedule to follow.
+    schedule: TransformSchedule,
+    /// Current probability value.
+    current_p: f32,
+    /// Whether this callback has been triggered (reserved for future use).
+    #[allow(dead_code)]
+    is_active: bool,
+}
+
+impl TransformSchedulerCallback {
+    /// Create a new transform scheduler callback.
+    pub fn new(transform_name: &str, schedule: TransformSchedule) -> Self {
+        let initial_p = match &schedule {
+            TransformSchedule::Constant(p) => *p,
+            TransformSchedule::LinearWarmup { .. } => 0.0,
+            TransformSchedule::LinearCooldown { max_p, .. } => *max_p,
+            TransformSchedule::CosineAnnealing { min_p, max_p } => (*min_p + *max_p) / 2.0,
+            TransformSchedule::Step { schedule } => schedule.first().map(|(_, p)| *p).unwrap_or(0.5),
+            TransformSchedule::DelayedStart { .. } => 0.0,
+        };
+
+        Self {
+            transform_name: transform_name.to_string(),
+            schedule,
+            current_p: initial_p,
+            is_active: true,
+        }
+    }
+
+    /// Get the current probability value.
+    pub fn current_probability(&self) -> f32 {
+        self.current_p
+    }
+
+    /// Get the transform name.
+    pub fn transform_name(&self) -> &str {
+        &self.transform_name
+    }
+
+    /// Compute the probability for the given epoch.
+    fn compute_probability(&self, epoch: usize, n_epochs: usize) -> f32 {
+        match &self.schedule {
+            TransformSchedule::Constant(p) => *p,
+
+            TransformSchedule::LinearWarmup { max_p, warmup_epochs } => {
+                if epoch >= *warmup_epochs {
+                    *max_p
+                } else {
+                    *max_p * (epoch as f32 / *warmup_epochs as f32)
+                }
+            }
+
+            TransformSchedule::LinearCooldown { max_p, cooldown_epochs } => {
+                let start_cooldown = n_epochs.saturating_sub(*cooldown_epochs);
+                if epoch < start_cooldown {
+                    *max_p
+                } else {
+                    let progress = (epoch - start_cooldown) as f32 / *cooldown_epochs as f32;
+                    *max_p * (1.0 - progress)
+                }
+            }
+
+            TransformSchedule::CosineAnnealing { min_p, max_p } => {
+                if n_epochs <= 1 {
+                    (*min_p + *max_p) / 2.0
+                } else {
+                    let progress = epoch as f32 / (n_epochs - 1) as f32;
+                    let cosine = (1.0 + (progress * std::f32::consts::PI).cos()) / 2.0;
+                    *min_p + (*max_p - *min_p) * cosine
+                }
+            }
+
+            TransformSchedule::Step { schedule } => {
+                let mut current_p = schedule.first().map(|(_, p)| *p).unwrap_or(0.5);
+                for &(step_epoch, p) in schedule {
+                    if epoch >= step_epoch {
+                        current_p = p;
+                    } else {
+                        break;
+                    }
+                }
+                current_p
+            }
+
+            TransformSchedule::DelayedStart { p, start_epoch } => {
+                if epoch >= *start_epoch {
+                    *p
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
+impl Callback for TransformSchedulerCallback {
+    fn before_fit(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        self.current_p = self.compute_probability(0, ctx.n_epochs);
+        tracing::info!(
+            "TransformScheduler: {} starting with p={:.3}",
+            self.transform_name,
+            self.current_p
+        );
+        Ok(())
+    }
+
+    fn before_epoch(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        self.current_p = self.compute_probability(ctx.epoch, ctx.n_epochs);
+        tracing::debug!(
+            "TransformScheduler: {} epoch {} p={:.3}",
+            self.transform_name,
+            ctx.epoch + 1,
+            self.current_p
+        );
+        Ok(())
+    }
+
+    fn after_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        tracing::info!(
+            "TransformScheduler: {} finished with final p={:.3}",
+            self.transform_name,
+            self.current_p
+        );
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "TransformSchedulerCallback"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1162,5 +1358,64 @@ mod tests {
 
         assert_eq!(callback.train_losses.len(), 5);
         assert_eq!(callback.valid_losses.len(), 5);
+    }
+
+    #[test]
+    fn test_transform_scheduler_constant() {
+        let callback = TransformSchedulerCallback::new(
+            "TestTransform",
+            TransformSchedule::Constant(0.8),
+        );
+        assert_eq!(callback.current_probability(), 0.8);
+    }
+
+    #[test]
+    fn test_transform_scheduler_linear_warmup() {
+        let mut callback = TransformSchedulerCallback::new(
+            "TestTransform",
+            TransformSchedule::LinearWarmup {
+                max_p: 1.0,
+                warmup_epochs: 5,
+            },
+        );
+
+        let mut ctx = CallbackContext::new(10, 100);
+
+        // Start at 0
+        callback.before_fit(&mut ctx).unwrap();
+        assert_eq!(callback.current_probability(), 0.0);
+
+        // Epoch 2: should be 0.4 (2/5 * 1.0)
+        ctx.epoch = 2;
+        callback.before_epoch(&mut ctx).unwrap();
+        assert!((callback.current_probability() - 0.4).abs() < 0.01);
+
+        // Epoch 5+: should be at max
+        ctx.epoch = 5;
+        callback.before_epoch(&mut ctx).unwrap();
+        assert_eq!(callback.current_probability(), 1.0);
+    }
+
+    #[test]
+    fn test_transform_scheduler_delayed_start() {
+        let mut callback = TransformSchedulerCallback::new(
+            "TestTransform",
+            TransformSchedule::DelayedStart {
+                p: 0.7,
+                start_epoch: 5,
+            },
+        );
+
+        let mut ctx = CallbackContext::new(10, 100);
+
+        // Before start_epoch
+        ctx.epoch = 3;
+        callback.before_epoch(&mut ctx).unwrap();
+        assert_eq!(callback.current_probability(), 0.0);
+
+        // At start_epoch
+        ctx.epoch = 5;
+        callback.before_epoch(&mut ctx).unwrap();
+        assert_eq!(callback.current_probability(), 0.7);
     }
 }

@@ -4319,6 +4319,252 @@ impl<B: Backend> Transform<B> for FreqDenoise {
     }
 }
 
+// ============================================================================
+// Random Convolution Transform
+// ============================================================================
+
+/// Configuration for random convolution augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomConvConfig {
+    /// Kernel size range (min, max).
+    pub kernel_size_range: (usize, usize),
+    /// Number of random convolutions to apply.
+    pub n_convs: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+    /// Whether to preserve the input mean.
+    pub preserve_mean: bool,
+}
+
+impl Default for RandomConvConfig {
+    fn default() -> Self {
+        Self {
+            kernel_size_range: (3, 7),
+            n_convs: 1,
+            p: 0.5,
+            preserve_mean: true,
+        }
+    }
+}
+
+/// Random convolution augmentation (TSRandomConv).
+///
+/// Applies random convolutional kernels to the time series, creating
+/// smoothed/filtered versions of the data as augmentation.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomConv;
+///
+/// // Create with default kernel size range (3-7)
+/// let transform = RandomConv::new();
+///
+/// // Or customize
+/// let transform = RandomConv::new()
+///     .with_kernel_range(5, 15)
+///     .with_n_convs(2)
+///     .with_probability(0.8);
+/// ```
+pub struct RandomConv {
+    config: RandomConvConfig,
+    seed: Seed,
+}
+
+impl Default for RandomConv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RandomConv {
+    /// Create a new random convolution transform with default settings.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            config: RandomConvConfig::default(),
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomConvConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the kernel size range.
+    #[must_use]
+    pub fn with_kernel_range(mut self, min: usize, max: usize) -> Self {
+        self.config.kernel_size_range = (min.max(1), max.max(min + 1));
+        self
+    }
+
+    /// Set the number of convolutions to apply.
+    #[must_use]
+    pub fn with_n_convs(mut self, n: usize) -> Self {
+        self.config.n_convs = n.max(1);
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set whether to preserve the mean.
+    #[must_use]
+    pub fn with_preserve_mean(mut self, preserve: bool) -> Self {
+        self.config.preserve_mean = preserve;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Generate a random convolution kernel.
+    fn random_kernel(&self, rng: &mut impl Rng, size: usize) -> Vec<f32> {
+        // Generate random weights
+        let mut kernel: Vec<f32> = (0..size).map(|_| rng.gen::<f32>()).collect();
+
+        // Normalize to sum to 1 (low-pass filter effect)
+        let sum: f32 = kernel.iter().sum();
+        if sum > 0.0 {
+            for k in &mut kernel {
+                *k /= sum;
+            }
+        }
+
+        kernel
+    }
+
+    /// Apply convolution to a 1D signal.
+    fn convolve(&self, signal: &[f32], kernel: &[f32]) -> Vec<f32> {
+        let n = signal.len();
+        let k = kernel.len();
+        let half_k = k / 2;
+
+        let mut output = vec![0.0f32; n];
+
+        for i in 0..n {
+            let mut sum = 0.0f32;
+            for (j, &kval) in kernel.iter().enumerate() {
+                let idx = i as isize + j as isize - half_k as isize;
+                let sample = if idx < 0 {
+                    signal[0]
+                } else if idx >= n as isize {
+                    signal[n - 1]
+                } else {
+                    signal[idx as usize]
+                };
+                sum += sample * kval;
+            }
+            output[i] = sum;
+        }
+
+        output
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomConv {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let mut conv_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * seq_len + v * seq_len;
+                let end = start + seq_len;
+                let ts = &x_values[start..end];
+
+                // Calculate original mean if needed
+                let orig_mean: f32 = if self.config.preserve_mean {
+                    ts.iter().sum::<f32>() / ts.len() as f32
+                } else {
+                    0.0
+                };
+
+                // Apply multiple random convolutions
+                let mut result = ts.to_vec();
+                for _ in 0..self.config.n_convs {
+                    let kernel_size = rng.gen_range(
+                        self.config.kernel_size_range.0..=self.config.kernel_size_range.1,
+                    );
+                    // Ensure odd kernel size for symmetric convolution
+                    let kernel_size = if kernel_size % 2 == 0 {
+                        kernel_size + 1
+                    } else {
+                        kernel_size
+                    };
+                    let kernel = self.random_kernel(&mut rng, kernel_size);
+                    result = self.convolve(&result, &kernel);
+                }
+
+                // Restore mean if needed
+                if self.config.preserve_mean {
+                    let new_mean: f32 = result.iter().sum::<f32>() / result.len() as f32;
+                    let diff = orig_mean - new_mean;
+                    for val in &mut result {
+                        *val += diff;
+                    }
+                }
+
+                for (i, &val) in result.iter().enumerate() {
+                    conv_values[start + i] = val;
+                }
+            }
+        }
+
+        let conv_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(conv_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(conv_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomConv"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

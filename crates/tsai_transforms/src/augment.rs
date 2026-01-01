@@ -3927,6 +3927,398 @@ impl<B: Backend> Transform<B> for Smooth {
     }
 }
 
+// ============================================================================
+// Frequency-Based Transforms
+// ============================================================================
+
+/// Configuration for random frequency noise transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomFreqNoiseConfig {
+    /// Noise magnitude (relative to signal std).
+    pub magnitude: f32,
+    /// Frequency band: "low", "mid", "high", or "all".
+    pub band: String,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomFreqNoiseConfig {
+    fn default() -> Self {
+        Self {
+            magnitude: 0.1,
+            band: "high".to_string(),
+            p: 0.5,
+        }
+    }
+}
+
+/// Adds noise to specific frequency bands of the time series.
+///
+/// This transform adds noise that targets specific frequency components:
+/// - "low": Adds slowly varying noise (affects trend)
+/// - "mid": Adds medium-frequency noise
+/// - "high": Adds high-frequency noise (affects fine details)
+/// - "all": Adds noise across all frequencies
+///
+/// Uses convolution-based approximation without requiring FFT.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomFreqNoise;
+///
+/// let transform = RandomFreqNoise::new(0.1, "high");
+/// ```
+pub struct RandomFreqNoise {
+    config: RandomFreqNoiseConfig,
+    seed: Seed,
+}
+
+impl RandomFreqNoise {
+    /// Create a new random frequency noise transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `magnitude` - Noise magnitude relative to signal std
+    /// * `band` - Frequency band: "low", "mid", "high", or "all"
+    #[must_use]
+    pub fn new(magnitude: f32, band: &str) -> Self {
+        Self {
+            config: RandomFreqNoiseConfig {
+                magnitude,
+                band: band.to_string(),
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomFreqNoiseConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Generate band-limited noise.
+    fn generate_band_noise(&self, rng: &mut impl Rng, seq_len: usize, std: f32) -> Vec<f32> {
+        let noise_std = self.config.magnitude * std;
+
+        match self.config.band.as_str() {
+            "low" => {
+                // Low-frequency: smooth random walk
+                let mut noise = vec![0.0f32; seq_len];
+                let step_size = noise_std * 0.5;
+                let mut cumsum = 0.0f32;
+                for n in &mut noise {
+                    cumsum += rng.gen_range(-step_size..step_size);
+                    *n = cumsum;
+                }
+                // Remove mean
+                let mean: f32 = noise.iter().sum::<f32>() / seq_len as f32;
+                for n in &mut noise {
+                    *n -= mean;
+                }
+                noise
+            }
+            "mid" => {
+                // Mid-frequency: sinusoidal with random phase
+                let mut noise = vec![0.0f32; seq_len];
+                let num_components = 3;
+                for _ in 0..num_components {
+                    let freq = rng.gen_range(2..10) as f32;
+                    let phase = rng.gen_range(0.0..std::f32::consts::TAU);
+                    let amp = noise_std / (num_components as f32).sqrt();
+                    for (i, n) in noise.iter_mut().enumerate() {
+                        let t = i as f32 / seq_len as f32;
+                        *n += amp * (std::f32::consts::TAU * freq * t + phase).sin();
+                    }
+                }
+                noise
+            }
+            "high" => {
+                // High-frequency: white noise with high-pass filtering
+                let mut noise: Vec<f32> = (0..seq_len)
+                    .map(|_| rng.gen_range(-noise_std..noise_std))
+                    .collect();
+                // Simple high-pass: subtract smoothed version
+                let window = 5.min(seq_len);
+                let mut smoothed = noise.clone();
+                for i in window / 2..seq_len - window / 2 {
+                    let sum: f32 = (0..window).map(|j| noise[i - window / 2 + j]).sum();
+                    smoothed[i] = sum / window as f32;
+                }
+                for (n, s) in noise.iter_mut().zip(&smoothed) {
+                    *n -= s;
+                }
+                noise
+            }
+            _ => {
+                // "all": standard white noise
+                (0..seq_len)
+                    .map(|_| rng.gen_range(-noise_std..noise_std))
+                    .collect()
+            }
+        }
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomFreqNoise {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x_data = batch.x.into_inner().into_data();
+        let mut x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * seq_len + v * seq_len;
+                let end = start + seq_len;
+                let ts = &x_values[start..end];
+
+                // Compute std of this channel
+                let mean: f32 = ts.iter().sum::<f32>() / seq_len as f32;
+                let var: f32 = ts.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / seq_len as f32;
+                let std = var.sqrt().max(1e-8);
+
+                // Generate band-limited noise
+                let noise = self.generate_band_noise(&mut rng, seq_len, std);
+
+                // Add noise
+                for (i, n) in noise.iter().enumerate() {
+                    x_values[start + i] += n;
+                }
+            }
+        }
+
+        let noisy_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(x_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(noisy_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomFreqNoise"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for frequency denoising transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FreqDenoiseConfig {
+    /// Cutoff frequency as fraction of Nyquist (0.0 to 1.0).
+    pub cutoff: f32,
+    /// Filter order (higher = sharper cutoff).
+    pub order: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for FreqDenoiseConfig {
+    fn default() -> Self {
+        Self {
+            cutoff: 0.3,
+            order: 3,
+            p: 0.5,
+        }
+    }
+}
+
+/// Denoises time series by filtering high frequencies.
+///
+/// Applies a low-pass filter to remove high-frequency noise.
+/// Uses cascaded moving averages to approximate a low-pass filter.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::FreqDenoise;
+///
+/// let transform = FreqDenoise::new(0.3);  // Keep frequencies below 30% of Nyquist
+/// ```
+pub struct FreqDenoise {
+    config: FreqDenoiseConfig,
+    seed: Seed,
+}
+
+impl FreqDenoise {
+    /// Create a new frequency denoising transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `cutoff` - Cutoff frequency as fraction of Nyquist (0.0 to 1.0)
+    #[must_use]
+    pub fn new(cutoff: f32) -> Self {
+        Self {
+            config: FreqDenoiseConfig {
+                cutoff: cutoff.clamp(0.01, 0.99),
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: FreqDenoiseConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the filter order.
+    #[must_use]
+    pub fn with_order(mut self, order: usize) -> Self {
+        self.config.order = order.max(1);
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Apply low-pass filter using cascaded moving averages.
+    fn apply_lowpass(&self, signal: &[f32]) -> Vec<f32> {
+        let seq_len = signal.len();
+
+        // Window size based on cutoff (inverse relationship)
+        let window_size = ((1.0 / self.config.cutoff).round() as usize)
+            .max(3)
+            .min(seq_len / 2);
+
+        let mut result = signal.to_vec();
+
+        // Apply cascaded moving averages (approximates Gaussian)
+        for _ in 0..self.config.order {
+            let mut smoothed = result.clone();
+            let half_window = window_size / 2;
+
+            for i in 0..seq_len {
+                let start = i.saturating_sub(half_window);
+                let end = (i + half_window + 1).min(seq_len);
+                let sum: f32 = result[start..end].iter().sum();
+                smoothed[i] = sum / (end - start) as f32;
+            }
+
+            result = smoothed;
+        }
+
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for FreqDenoise {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let mut denoised_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * seq_len + v * seq_len;
+                let end = start + seq_len;
+                let ts = &x_values[start..end];
+
+                let filtered = self.apply_lowpass(ts);
+
+                for (i, &val) in filtered.iter().enumerate() {
+                    denoised_values[start + i] = val;
+                }
+            }
+        }
+
+        let denoised_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(denoised_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(denoised_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "FreqDenoise"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

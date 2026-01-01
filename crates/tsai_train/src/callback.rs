@@ -840,6 +840,255 @@ impl Callback for TerminateOnNanCallback {
     }
 }
 
+/// Callback for displaying ASCII training graphs.
+///
+/// Shows training and validation loss curves in the terminal after each epoch.
+/// Useful for quick visual feedback on training progress without external tools.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_train::callback::ShowGraphCallback;
+///
+/// // Create with default settings (40x10 graph)
+/// let callback = ShowGraphCallback::new();
+///
+/// // Or customize the display
+/// let callback = ShowGraphCallback::new()
+///     .with_width(60)
+///     .with_height(15)
+///     .with_metrics(vec!["accuracy"]);
+/// ```
+pub struct ShowGraphCallback {
+    /// Training losses to plot.
+    train_losses: Vec<f32>,
+    /// Validation losses to plot.
+    valid_losses: Vec<f32>,
+    /// Additional metrics to track.
+    metrics_history: HashMap<String, Vec<f32>>,
+    /// Names of additional metrics to display.
+    metric_names: Vec<String>,
+    /// Graph width in characters.
+    width: usize,
+    /// Graph height in characters.
+    height: usize,
+    /// Whether to show after each epoch.
+    show_per_epoch: bool,
+}
+
+impl Default for ShowGraphCallback {
+    fn default() -> Self {
+        Self {
+            train_losses: Vec::new(),
+            valid_losses: Vec::new(),
+            metrics_history: HashMap::new(),
+            metric_names: Vec::new(),
+            width: 50,
+            height: 10,
+            show_per_epoch: true,
+        }
+    }
+}
+
+impl ShowGraphCallback {
+    /// Create a new show graph callback with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the graph width in characters.
+    #[must_use]
+    pub fn with_width(mut self, width: usize) -> Self {
+        self.width = width.max(20);
+        self
+    }
+
+    /// Set the graph height in characters.
+    #[must_use]
+    pub fn with_height(mut self, height: usize) -> Self {
+        self.height = height.max(5);
+        self
+    }
+
+    /// Add metrics to display in addition to loss.
+    #[must_use]
+    pub fn with_metrics(mut self, names: Vec<&str>) -> Self {
+        self.metric_names = names.into_iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    /// Set whether to show the graph after each epoch.
+    #[must_use]
+    pub fn show_per_epoch(mut self, show: bool) -> Self {
+        self.show_per_epoch = show;
+        self
+    }
+
+    /// Render an ASCII graph for a set of values.
+    fn render_graph(&self, label: &str, values: &[f32], color_start: &str, color_end: &str) -> String {
+        if values.is_empty() {
+            return String::new();
+        }
+
+        let mut output = String::new();
+
+        // Find min/max for scaling
+        let min_val = values.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_val = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let range = (max_val - min_val).max(1e-6);
+
+        // Create graph header
+        output.push_str(&format!("┌─ {} ", label));
+        let header_remaining = self.width.saturating_sub(label.len() + 4);
+        output.push_str(&"─".repeat(header_remaining));
+        output.push_str("┐\n");
+
+        // Create the plot area
+        let mut grid = vec![vec![' '; self.width]; self.height];
+
+        // Map values to grid positions
+        let step = values.len() as f32 / self.width as f32;
+        for col in 0..self.width {
+            let idx = (col as f32 * step) as usize;
+            if idx < values.len() {
+                let val = values[idx];
+                let normalized = (val - min_val) / range;
+                let row = ((1.0 - normalized) * (self.height - 1) as f32) as usize;
+                let row = row.min(self.height - 1);
+                grid[row][col] = '█';
+            }
+        }
+
+        // Render grid with axis labels
+        for (i, row) in grid.iter().enumerate() {
+            // Y-axis label
+            if i == 0 {
+                output.push_str(&format!("│{:>6.3} ", max_val));
+            } else if i == self.height - 1 {
+                output.push_str(&format!("│{:>6.3} ", min_val));
+            } else {
+                output.push_str("│       ");
+            }
+
+            // Plot data with color
+            output.push_str(color_start);
+            for &ch in row {
+                output.push(ch);
+            }
+            output.push_str(color_end);
+            output.push_str("│\n");
+        }
+
+        // Bottom border with epoch labels
+        output.push_str("└───────");
+        output.push_str(&"─".repeat(self.width));
+        output.push_str("┘\n");
+
+        // X-axis label
+        output.push_str(&format!("        Epochs: 1 → {}\n", values.len()));
+
+        output
+    }
+
+    /// Display the training graphs.
+    fn display_graphs(&self) {
+        let mut output = String::new();
+        output.push_str("\n╔══════════════════════════════════════════════════════════════╗\n");
+        output.push_str("║                    Training Progress                         ║\n");
+        output.push_str("╚══════════════════════════════════════════════════════════════╝\n\n");
+
+        // Show training loss
+        if !self.train_losses.is_empty() {
+            output.push_str(&self.render_graph("Train Loss", &self.train_losses, "\x1b[33m", "\x1b[0m"));
+            output.push('\n');
+        }
+
+        // Show validation loss
+        if !self.valid_losses.is_empty() {
+            output.push_str(&self.render_graph("Valid Loss", &self.valid_losses, "\x1b[36m", "\x1b[0m"));
+            output.push('\n');
+        }
+
+        // Show additional metrics
+        for name in &self.metric_names {
+            if let Some(values) = self.metrics_history.get(name) {
+                if !values.is_empty() {
+                    output.push_str(&self.render_graph(name, values, "\x1b[32m", "\x1b[0m"));
+                    output.push('\n');
+                }
+            }
+        }
+
+        // Current values summary
+        output.push_str("Current Values:\n");
+        if let Some(train) = self.train_losses.last() {
+            output.push_str(&format!("  Train Loss: {:.4}\n", train));
+        }
+        if let Some(valid) = self.valid_losses.last() {
+            output.push_str(&format!("  Valid Loss: {:.4}\n", valid));
+        }
+        for name in &self.metric_names {
+            if let Some(values) = self.metrics_history.get(name) {
+                if let Some(val) = values.last() {
+                    output.push_str(&format!("  {}: {:.4}\n", name, val));
+                }
+            }
+        }
+
+        // Print to stdout
+        print!("{}", output);
+    }
+}
+
+impl Callback for ShowGraphCallback {
+    fn before_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        self.train_losses.clear();
+        self.valid_losses.clear();
+        self.metrics_history.clear();
+        tracing::info!("ShowGraph enabled - will display training curves");
+        Ok(())
+    }
+
+    fn after_epoch(&mut self, ctx: &mut CallbackContext) -> Result<()> {
+        // Record losses
+        if let Some(loss) = ctx.train_loss {
+            self.train_losses.push(loss);
+        }
+        if let Some(loss) = ctx.valid_loss {
+            self.valid_losses.push(loss);
+        }
+
+        // Record tracked metrics
+        for name in &self.metric_names {
+            if let Some(&value) = ctx.metrics.get(name) {
+                self.metrics_history
+                    .entry(name.clone())
+                    .or_default()
+                    .push(value);
+            }
+        }
+
+        // Display if enabled
+        if self.show_per_epoch {
+            self.display_graphs();
+        }
+
+        Ok(())
+    }
+
+    fn after_fit(&mut self, _ctx: &mut CallbackContext) -> Result<()> {
+        // Always show final graph
+        if !self.show_per_epoch && (!self.train_losses.is_empty() || !self.valid_losses.is_empty()) {
+            self.display_graphs();
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "ShowGraphCallback"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,5 +1130,37 @@ mod tests {
         assert_eq!(history.train_losses(), &[0.5]);
         assert_eq!(history.valid_losses(), &[0.4]);
         assert_eq!(history.learning_rates(), &[0.001]);
+    }
+
+    #[test]
+    fn test_show_graph_callback_config() {
+        let callback = ShowGraphCallback::new()
+            .with_width(60)
+            .with_height(15)
+            .with_metrics(vec!["accuracy", "f1"]);
+
+        assert_eq!(callback.width, 60);
+        assert_eq!(callback.height, 15);
+        assert_eq!(callback.metric_names, vec!["accuracy", "f1"]);
+    }
+
+    #[test]
+    fn test_show_graph_callback_render() {
+        let mut callback = ShowGraphCallback::new()
+            .with_width(30)
+            .with_height(5)
+            .show_per_epoch(false);
+
+        let mut ctx = CallbackContext::new(10, 100);
+
+        // Simulate several epochs
+        for i in 0..5 {
+            ctx.train_loss = Some(1.0 - i as f32 * 0.1);
+            ctx.valid_loss = Some(0.9 - i as f32 * 0.08);
+            callback.after_epoch(&mut ctx).unwrap();
+        }
+
+        assert_eq!(callback.train_losses.len(), 5);
+        assert_eq!(callback.valid_losses.len(), 5);
     }
 }

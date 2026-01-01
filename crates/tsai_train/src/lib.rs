@@ -42,7 +42,7 @@ pub mod training;
 pub use callback::{
     Callback, CallbackContext, CallbackList, CheckpointMetadata, EarlyStoppingCallback,
     GradientClipCallback, GradientClipMode, HistoryCallback, MixedPrecisionCallback,
-    ProgressCallback, SaveModelCallback, SaveModelMode, TerminateOnNanCallback,
+    ProgressCallback, SaveModelCallback, SaveModelMode, ShowGraphCallback, TerminateOnNanCallback,
 };
 pub use error::{Result, TrainError};
 pub use learner::{Learner, LearnerConfig, TrainingState};

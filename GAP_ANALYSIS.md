@@ -14,19 +14,19 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 27 architectures | **67%** |
-| **Augmentation Transforms** | 40+ transforms | 26 transforms | **65%** |
+| **Models** | 40+ architectures | 28 architectures | **70%** |
+| **Augmentation Transforms** | 40+ transforms | 28 transforms | **70%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
 | **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
-| **Callbacks** | 10+ callbacks | 8 callbacks | **80%** |
+| **Callbacks** | 10+ callbacks | 9 callbacks | **90%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
 | **Data I/O** | Multiple formats | 4 formats | **80%** |
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~79%**
+**Overall Feature Parity: ~80%**
 
 ---
 
@@ -44,7 +44,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | OmniScaleCNN | ✅ | ✅ | **FIT** | Multi-scale 1D CNN |
 | XCM | ✅ | ✅ | **FIT** | XCMPlus implemented |
 | TCN | ✅ | ✅ | **FIT** | Temporal Convolutional Network with causal dilations |
-| mWDN | ✅ | ❌ | **GAP** | Multi-level Wavelet Decomposition |
+| mWDN | ✅ | ✅ | **FIT** | Multi-level Wavelet Decomposition with Haar wavelet |
 
 ### 1.2 Transformer Models
 
@@ -104,9 +104,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Model Gap Summary
 
-- **Implemented:** 27 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, TabTransformer, LSTM, GRU)
-- **Missing:** 13+ models
-- **Priority Gaps:** MLSTM-FCN, mWDN, TransformerRNNPlus, ConvTranPlus
+- **Implemented:** 28 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, TabTransformer, LSTM, GRU)
+- **Missing:** 12+ models
+- **Priority Gaps:** MLSTM-FCN, TransformerRNNPlus, ConvTranPlus
 
 ---
 
@@ -128,7 +128,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSMagAddNoise | ✅ | ✅ | **FIT** | Magnitude-scaled additive noise |
 | TSMagMulNoise | ✅ | ✅ | **FIT** | Magnitude-scaled multiplicative noise |
 | TSTimeNoise | ✅ | ✅ | **FIT** | Time-axis noise |
-| TSRandomFreqNoise | ✅ | ❌ | **GAP** | Wavelet-based noise |
+| TSRandomFreqNoise | ✅ | ✅ | **FIT** | Band-limited frequency noise |
 
 ### 2.3 Warping & Scaling
 
@@ -193,7 +193,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-----------|---------------|----------------|--------|-------|
 | TSBlur | ✅ | ✅ | **FIT** | Gaussian blur filter |
 | TSSmooth | ✅ | ✅ | **FIT** | Moving average/exponential smoothing |
-| TSFreqDenoise | ✅ | ❌ | **GAP** | Frequency denoising |
+| TSFreqDenoise | ✅ | ✅ | **FIT** | Low-pass frequency denoising |
 
 ### 2.9 Advanced
 
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 26 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth)
-- **Missing:** 15+ transforms
-- **Priority Gaps:** TSRandomFreqNoise, TSFreqDenoise, TSRandomConv
+- **Implemented:** 28 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise)
+- **Missing:** 12+ transforms
+- **Priority Gaps:** TSRandomConv, advanced wavelet transforms
 
 ---
 
@@ -292,7 +292,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | HistoryCallback | ✅ | ✅ | **FIT** | Training history |
 | MixedPrecision | ✅ | ✅ | **FIT** | Mixed precision training |
 | TerminateOnNan | ✅ | ✅ | **FIT** | NaN termination |
-| ShowGraph | ✅ | ❌ | **GAP** | Training visualization |
+| ShowGraph | ✅ | ✅ | **FIT** | ASCII training curves visualization |
 | TransformScheduler | ✅ | ❌ | **GAP** | Transform scheduling |
 | WeightedPerSampleLoss | ✅ | ❌ | **GAP** | Sample weighting |
 | BatchSubsampler | ✅ | ❌ | **GAP** | Batch subsampling |
@@ -412,17 +412,14 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 1. **Models to Add:**
    - MLSTM-FCN (Multi-LSTM + FCN)
-   - mWDN (Multilevel Wavelet Decomposition Network)
    - TransformerRNNPlus
    - ConvTranPlus
 
 2. **Transforms to Add:**
-   - TSRandomFreqNoise (wavelet-based noise)
-   - TSFreqDenoise (frequency denoising)
-   - TSRandomConv
+   - TSRandomConv (random convolution augmentation)
+   - Advanced wavelet-based transforms
 
 3. **Training Infrastructure:**
-   - ShowGraph callback
    - TransformScheduler callback
 
 ### Medium Priority (Enhanced Functionality)
@@ -498,10 +495,10 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ## 12. Conclusion
 
-tsai-rs provides a solid foundation with approximately **79% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
+tsai-rs provides a solid foundation with approximately **80% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
 1. **Model diversity** - 27 of 40+ models implemented (~67%)
-2. **Augmentation transforms** - 26 of 40+ transforms implemented (~65%)
+2. **Augmentation transforms** - 28 of 40+ transforms implemented (~70%)
 3. **Advanced features** - Missing some specialized callbacks
 
 The Rust implementation benefits from:
@@ -514,9 +511,9 @@ The Rust implementation benefits from:
 
 **Recommended next steps:**
 1. Add MLSTM-FCN and TransformerRNNPlus models
-2. Implement mWDN (Wavelet Decomposition Network)
-3. Add TSRandomFreqNoise and TSFreqDenoise transforms
-4. Implement ShowGraph callback for training visualization
+2. Add TSRandomConv transform
+3. Add ConvTranPlus model
+4. Add TransformScheduler callback
 5. Add ONNX export support
 
 ---

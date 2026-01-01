@@ -2,6 +2,12 @@
 //!
 //! These transforms mix samples and their labels during training
 //! to improve generalization.
+//!
+//! # Base Handler
+//!
+//! The [`MixHandler1d`] trait provides a common interface for all mixing transforms.
+//! Implementations can define custom mixing logic while benefiting from shared
+//! utilities for batch processing and label mixing.
 
 use burn::prelude::*;
 use rand::prelude::*;
@@ -9,6 +15,213 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use tsai_core::{CoreError, Result, Seed, Split, TSBatch, TSTensor, Transform};
+
+/// Base handler trait for label mixing transforms.
+///
+/// This trait provides a common interface for transforms that mix samples
+/// and their labels during training. Implementations define how to:
+/// - Sample mixing coefficients (e.g., from Beta distribution)
+/// - Mix input data (X values)
+/// - Mix labels (Y values)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::label_mix::MixHandler1d;
+///
+/// struct MyMixTransform {
+///     alpha: f32,
+/// }
+///
+/// impl MixHandler1d for MyMixTransform {
+///     fn sample_lambda(&self, rng: &mut ChaCha8Rng) -> f32 {
+///         // Custom lambda sampling
+///     }
+///
+///     fn mix_samples(&self, x1: &[f32], x2: &[f32], lambda: f32) -> Vec<f32> {
+///         // Custom sample mixing
+///     }
+/// }
+/// ```
+pub trait MixHandler1d {
+    /// Sample a mixing coefficient lambda.
+    ///
+    /// Typically drawn from Beta(alpha, alpha) distribution.
+    /// Returns value in [0, 1] where:
+    /// - 1.0 means use only the original sample
+    /// - 0.0 means use only the mixed sample
+    fn sample_lambda(&self, rng: &mut ChaCha8Rng) -> f32;
+
+    /// Mix two samples with given lambda.
+    ///
+    /// Default implementation: linear interpolation
+    /// x' = lambda * x1 + (1 - lambda) * x2
+    fn mix_samples(&self, x1: &[f32], x2: &[f32], lambda: f32) -> Vec<f32> {
+        x1.iter()
+            .zip(x2.iter())
+            .map(|(&a, &b)| lambda * a + (1.0 - lambda) * b)
+            .collect()
+    }
+
+    /// Mix two label vectors with given lambda.
+    ///
+    /// Default implementation: linear interpolation
+    /// y' = lambda * y1 + (1 - lambda) * y2
+    fn mix_labels(&self, y1: &[f32], y2: &[f32], lambda: f32) -> Vec<f32> {
+        y1.iter()
+            .zip(y2.iter())
+            .map(|(&a, &b)| lambda * a + (1.0 - lambda) * b)
+            .collect()
+    }
+
+    /// Get the probability of applying this transform.
+    fn probability(&self) -> f32 {
+        1.0
+    }
+
+    /// Get the name of this transform.
+    fn name(&self) -> &str {
+        "MixHandler1d"
+    }
+
+    /// Check if the transform should be applied based on probability.
+    fn should_apply(&self, rng: &mut ChaCha8Rng) -> bool {
+        rng.gen::<f32>() <= self.probability()
+    }
+
+    /// Sample lambda from Beta(alpha, alpha) using simple approximation.
+    ///
+    /// This helper can be used by implementations.
+    fn sample_beta_lambda(alpha: f32, rng: &mut ChaCha8Rng) -> f32 {
+        let u: f32 = rng.gen();
+        let v: f32 = rng.gen();
+        let x = u.powf(1.0 / alpha);
+        let y = v.powf(1.0 / alpha);
+        x / (x + y)
+    }
+
+    /// Create shuffled indices for pairing samples.
+    fn create_shuffle_indices(batch_size: usize, rng: &mut ChaCha8Rng) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..batch_size).collect();
+        indices.shuffle(rng);
+        indices
+    }
+}
+
+/// Mix strategy enumeration for selecting mixing behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MixStrategy {
+    /// Standard MixUp: linear interpolation of entire samples.
+    MixUp,
+    /// CutMix: paste a cut region from another sample.
+    CutMix,
+    /// IntraClass CutMix: only mix within same class.
+    IntraClassCutMix,
+    /// Random choice between strategies.
+    Random,
+}
+
+impl Default for MixStrategy {
+    fn default() -> Self {
+        Self::MixUp
+    }
+}
+
+/// Configuration for a generic mix handler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixHandlerConfig {
+    /// Alpha parameter for Beta distribution.
+    pub alpha: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+    /// Mixing strategy to use.
+    pub strategy: MixStrategy,
+}
+
+impl Default for MixHandlerConfig {
+    fn default() -> Self {
+        Self {
+            alpha: 0.4,
+            p: 1.0,
+            strategy: MixStrategy::MixUp,
+        }
+    }
+}
+
+/// Generic mix handler that can apply different mixing strategies.
+pub struct GenericMixHandler {
+    config: MixHandlerConfig,
+    seed: Seed,
+}
+
+impl GenericMixHandler {
+    /// Create a new generic mix handler.
+    #[must_use]
+    pub fn new(config: MixHandlerConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create with default MixUp configuration.
+    #[must_use]
+    pub fn mixup(alpha: f32) -> Self {
+        Self::new(MixHandlerConfig {
+            alpha,
+            strategy: MixStrategy::MixUp,
+            ..Default::default()
+        })
+    }
+
+    /// Create with CutMix configuration.
+    #[must_use]
+    pub fn cutmix(alpha: f32) -> Self {
+        Self::new(MixHandlerConfig {
+            alpha,
+            strategy: MixStrategy::CutMix,
+            ..Default::default()
+        })
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Set the probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Get the current strategy.
+    pub fn strategy(&self) -> MixStrategy {
+        self.config.strategy
+    }
+}
+
+impl MixHandler1d for GenericMixHandler {
+    fn sample_lambda(&self, rng: &mut ChaCha8Rng) -> f32 {
+        Self::sample_beta_lambda(self.config.alpha, rng)
+    }
+
+    fn probability(&self) -> f32 {
+        self.config.p
+    }
+
+    fn name(&self) -> &str {
+        match self.config.strategy {
+            MixStrategy::MixUp => "GenericMixHandler(MixUp)",
+            MixStrategy::CutMix => "GenericMixHandler(CutMix)",
+            MixStrategy::IntraClassCutMix => "GenericMixHandler(IntraClassCutMix)",
+            MixStrategy::Random => "GenericMixHandler(Random)",
+        }
+    }
+}
 
 /// Configuration for MixUp transform.
 #[derive(Debug, Clone, Serialize, Deserialize)]

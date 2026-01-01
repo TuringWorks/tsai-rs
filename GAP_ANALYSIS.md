@@ -16,8 +16,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |----------|---------------|----------------|----------|
 | **Models** | 40+ architectures | 41 architectures | **100%** |
 | **Augmentation Transforms** | 40+ transforms | 46 transforms | **100%** |
-| **Label Mixing** | 4 transforms | 3 transforms | **75%** |
-| **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
+| **Label Mixing** | 4 transforms | 4 transforms | **100%** |
+| **Imaging Transforms** | 7 transforms | 7 transforms | **100%** |
 | **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
 | **Callbacks** | 10+ callbacks | 14 callbacks | **100%** |
@@ -217,7 +217,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | MixUp1d | ✅ | ✅ | **FIT** | Fully implemented |
 | CutMix1d | ✅ | ✅ | **FIT** | Fully implemented |
 | IntraClassCutMix1d | ✅ | ✅ | **FIT** | Fully implemented |
-| MixHandler1d | ✅ | ❌ | **GAP** | Base handler |
+| MixHandler1d | ✅ | ✅ | **FIT** | Base trait with mix_samples, mix_labels, GenericMixHandler |
 
 ---
 
@@ -230,8 +230,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSToMTF | ✅ | ✅ | **FIT** | Markov Transition Field |
 | TSToRP | ✅ | ✅ | **FIT** | Recurrence Plot |
 | TSToJRP | ✅ | ✅ | **FIT** | Joint Recurrence Plot |
-| TSToPlot | ✅ | ❌ | **GAP** | Matplotlib plot |
-| TSToMat | ✅ | ❌ | **GAP** | Matrix visualization |
+| TSToPlot | ✅ | ✅ | **FIT** | ASCII plots, CSV export for external plotting |
+| TSToMat | ✅ | ✅ | **FIT** | Matrix reshape with layout options, normalization |
 
 ---
 

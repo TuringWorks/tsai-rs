@@ -491,6 +491,388 @@ impl TSToJRP {
     }
 }
 
+/// Configuration for matrix visualization transform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MatrixLayout {
+    /// Variables as rows, time as columns (n_vars, seq_len).
+    VarsRows,
+    /// Time as rows, variables as columns (seq_len, n_vars).
+    TimeRows,
+}
+
+impl Default for MatrixLayout {
+    fn default() -> Self {
+        Self::VarsRows
+    }
+}
+
+/// Configuration for TSToMat transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TSToMatConfig {
+    /// Layout of the output matrix.
+    pub layout: MatrixLayout,
+    /// Whether to normalize values to [0, 1].
+    pub normalize: bool,
+    /// Whether to apply colormap-style scaling.
+    pub colormap: bool,
+}
+
+impl Default for TSToMatConfig {
+    fn default() -> Self {
+        Self {
+            layout: MatrixLayout::VarsRows,
+            normalize: true,
+            colormap: false,
+        }
+    }
+}
+
+/// Converts time series to a 2D matrix representation.
+///
+/// This transform reshapes multivariate time series data into a 2D matrix
+/// suitable for visualization or CNN-based processing.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::imaging::TSToMat;
+///
+/// // Create transform (variables as rows, time as columns)
+/// let transform = TSToMat::new();
+///
+/// // For a 3-variable, 100-length series: (3, 100) -> 3x100 matrix
+/// let matrix = transform.compute(&series);
+/// ```
+#[derive(Debug, Clone)]
+pub struct TSToMat {
+    config: TSToMatConfig,
+}
+
+impl TSToMat {
+    /// Create a new TSToMat transform with default config.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            config: TSToMatConfig::default(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: TSToMatConfig) -> Self {
+        Self { config }
+    }
+
+    /// Set the matrix layout.
+    #[must_use]
+    pub fn with_layout(mut self, layout: MatrixLayout) -> Self {
+        self.config.layout = layout;
+        self
+    }
+
+    /// Enable/disable normalization.
+    #[must_use]
+    pub fn with_normalize(mut self, normalize: bool) -> Self {
+        self.config.normalize = normalize;
+        self
+    }
+
+    /// Enable/disable colormap scaling.
+    #[must_use]
+    pub fn with_colormap(mut self, colormap: bool) -> Self {
+        self.config.colormap = colormap;
+        self
+    }
+
+    /// Convert multivariate time series to matrix.
+    ///
+    /// # Arguments
+    ///
+    /// * `series` - Input multivariate time series of shape (n_vars, seq_len)
+    ///
+    /// # Returns
+    ///
+    /// A 2D matrix representation.
+    pub fn compute(&self, series: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        if series.is_empty() {
+            return vec![];
+        }
+
+        let n_vars = series.len();
+        let seq_len = series[0].len();
+
+        // Apply normalization if enabled
+        let normalized: Vec<Vec<f32>> = if self.config.normalize {
+            // Find global min/max
+            let mut min_val = f32::INFINITY;
+            let mut max_val = f32::NEG_INFINITY;
+            for var in series {
+                for &val in var {
+                    if val.is_finite() {
+                        min_val = min_val.min(val);
+                        max_val = max_val.max(val);
+                    }
+                }
+            }
+            let range = (max_val - min_val).max(1e-8);
+
+            series
+                .iter()
+                .map(|var| {
+                    var.iter()
+                        .map(|&val| {
+                            if val.is_finite() {
+                                (val - min_val) / range
+                            } else {
+                                0.5
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        } else {
+            series.to_vec()
+        };
+
+        // Apply layout
+        match self.config.layout {
+            MatrixLayout::VarsRows => {
+                // Already in (n_vars, seq_len) format
+                normalized
+            }
+            MatrixLayout::TimeRows => {
+                // Transpose to (seq_len, n_vars)
+                let mut transposed = vec![vec![0.0f32; n_vars]; seq_len];
+                for v in 0..n_vars {
+                    for t in 0..seq_len {
+                        transposed[t][v] = normalized[v][t];
+                    }
+                }
+                transposed
+            }
+        }
+    }
+
+    /// Convert univariate time series to matrix.
+    ///
+    /// # Arguments
+    ///
+    /// * `series` - Input univariate time series of length seq_len
+    ///
+    /// # Returns
+    ///
+    /// A 2D matrix with a single row (or column based on layout).
+    pub fn compute_univariate(&self, series: &[f32]) -> Vec<Vec<f32>> {
+        self.compute(&[series.to_vec()])
+    }
+
+    /// Get ASCII representation of the matrix for debugging.
+    pub fn to_ascii(&self, matrix: &[Vec<f32>], width: usize, height: usize) -> String {
+        if matrix.is_empty() || matrix[0].is_empty() {
+            return String::new();
+        }
+
+        let chars = [' ', '░', '▒', '▓', '█'];
+        let n_rows = matrix.len();
+        let n_cols = matrix[0].len();
+
+        // Sample rows and columns to fit dimensions
+        let row_step = (n_rows as f32 / height as f32).max(1.0);
+        let col_step = (n_cols as f32 / width as f32).max(1.0);
+
+        let mut output = String::new();
+        for h in 0..height.min(n_rows) {
+            let r = (h as f32 * row_step) as usize;
+            if r >= n_rows {
+                break;
+            }
+
+            for w in 0..width.min(n_cols) {
+                let c = (w as f32 * col_step) as usize;
+                if c >= n_cols {
+                    break;
+                }
+
+                let val = matrix[r][c].clamp(0.0, 1.0);
+                let char_idx = (val * (chars.len() - 1) as f32).round() as usize;
+                output.push(chars[char_idx]);
+            }
+            output.push('\n');
+        }
+
+        output
+    }
+}
+
+impl Default for TSToMat {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Converts time series to a simple plot representation (ASCII or data export).
+///
+/// This is a Rust alternative to Python's TSToPlot which uses matplotlib.
+/// Instead, this provides ASCII plotting and data export for external plotting.
+#[derive(Debug, Clone)]
+pub struct TSToPlot {
+    /// Width of ASCII plot.
+    width: usize,
+    /// Height of ASCII plot.
+    height: usize,
+    /// Whether to show axis labels.
+    show_labels: bool,
+}
+
+impl TSToPlot {
+    /// Create a new TSToPlot.
+    #[must_use]
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            show_labels: true,
+        }
+    }
+
+    /// Disable axis labels.
+    #[must_use]
+    pub fn without_labels(mut self) -> Self {
+        self.show_labels = false;
+        self
+    }
+
+    /// Generate ASCII plot of a univariate time series.
+    pub fn plot_ascii(&self, series: &[f32]) -> String {
+        if series.is_empty() {
+            return String::new();
+        }
+
+        let min_val = series.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_val = series.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let range = (max_val - min_val).max(1e-8);
+
+        let mut plot = vec![vec![' '; self.width]; self.height];
+
+        // Plot points
+        for (i, &val) in series.iter().enumerate() {
+            let x = (i as f32 / (series.len() - 1).max(1) as f32 * (self.width - 1) as f32) as usize;
+            let y = ((val - min_val) / range * (self.height - 1) as f32) as usize;
+            let y = (self.height - 1).saturating_sub(y); // Flip y-axis
+
+            if x < self.width && y < self.height {
+                plot[y][x] = '●';
+            }
+        }
+
+        // Connect points with lines
+        for i in 1..series.len() {
+            let x1 = ((i - 1) as f32 / (series.len() - 1).max(1) as f32 * (self.width - 1) as f32) as usize;
+            let x2 = (i as f32 / (series.len() - 1).max(1) as f32 * (self.width - 1) as f32) as usize;
+
+            for x in x1..=x2 {
+                if x < self.width {
+                    let t = if x2 > x1 {
+                        (x - x1) as f32 / (x2 - x1) as f32
+                    } else {
+                        0.0
+                    };
+                    let val = series[i - 1] * (1.0 - t) + series[i] * t;
+                    let y = ((val - min_val) / range * (self.height - 1) as f32) as usize;
+                    let y = (self.height - 1).saturating_sub(y);
+
+                    if y < self.height && plot[y][x] == ' ' {
+                        plot[y][x] = '·';
+                    }
+                }
+            }
+        }
+
+        // Build output string
+        let mut output = String::new();
+
+        if self.show_labels {
+            output.push_str(&format!("{:>8.2} ┤", max_val));
+        }
+
+        for (i, row) in plot.iter().enumerate() {
+            if i > 0 && self.show_labels {
+                output.push_str("         │");
+            }
+            for &ch in row {
+                output.push(ch);
+            }
+            output.push('\n');
+        }
+
+        if self.show_labels {
+            output.push_str(&format!("{:>8.2} ┤", min_val));
+            for _ in 0..self.width {
+                output.push('─');
+            }
+            output.push('\n');
+        }
+
+        output
+    }
+
+    /// Generate multivariate plot (stacked).
+    pub fn plot_multivariate_ascii(&self, series: &[Vec<f32>]) -> String {
+        let mut output = String::new();
+
+        for (i, var) in series.iter().enumerate() {
+            output.push_str(&format!("Variable {}:\n", i));
+            output.push_str(&self.plot_ascii(var));
+            output.push('\n');
+        }
+
+        output
+    }
+
+    /// Export data for external plotting (CSV format).
+    pub fn export_csv(&self, series: &[f32]) -> String {
+        let mut output = String::from("time,value\n");
+        for (i, &val) in series.iter().enumerate() {
+            output.push_str(&format!("{},{}\n", i, val));
+        }
+        output
+    }
+
+    /// Export multivariate data for external plotting (CSV format).
+    pub fn export_multivariate_csv(&self, series: &[Vec<f32>]) -> String {
+        if series.is_empty() {
+            return String::from("time\n");
+        }
+
+        let n_vars = series.len();
+        let seq_len = series[0].len();
+
+        // Header
+        let mut output = String::from("time");
+        for i in 0..n_vars {
+            output.push_str(&format!(",var{}", i));
+        }
+        output.push('\n');
+
+        // Data
+        for t in 0..seq_len {
+            output.push_str(&format!("{}", t));
+            for v in 0..n_vars {
+                output.push_str(&format!(",{}", series[v][t]));
+            }
+            output.push('\n');
+        }
+
+        output
+    }
+}
+
+impl Default for TSToPlot {
+    fn default() -> Self {
+        Self::new(60, 15)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,8 +2,10 @@
 
 mod gated_tab_transformer;
 mod tab_fusion;
+mod tab_model;
 mod tab_transformer;
 
 pub use gated_tab_transformer::{GatedTabTransformer, GatedTabTransformerConfig};
 pub use tab_fusion::{TabFusionTransformer, TabFusionTransformerConfig};
+pub use tab_model::{TabModel, TabModelConfig};
 pub use tab_transformer::{TabTransformer, TabTransformerConfig};

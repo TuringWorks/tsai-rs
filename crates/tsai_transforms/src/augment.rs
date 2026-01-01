@@ -5075,6 +5075,464 @@ impl<B: Backend> Transform<B> for MagScalePerVar {
     }
 }
 
+// =============================================================================
+// TSRandomTrend: Add random trend to time series
+// =============================================================================
+
+/// Configuration for random trend augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomTrendConfig {
+    /// Maximum trend magnitude (slope).
+    pub max_trend: f32,
+    /// Whether to also add quadratic trend.
+    pub add_quadratic: bool,
+    /// Maximum quadratic coefficient.
+    pub max_quadratic: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomTrendConfig {
+    fn default() -> Self {
+        Self {
+            max_trend: 0.1,
+            add_quadratic: false,
+            max_quadratic: 0.01,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random trend augmentation.
+///
+/// Adds a random linear (and optionally quadratic) trend to the time series.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomTrend;
+///
+/// // Add random linear trend with max slope 0.1
+/// let transform = RandomTrend::new(0.1);
+///
+/// // Add both linear and quadratic trends
+/// let transform = RandomTrend::new(0.1).with_quadratic(0.01);
+/// ```
+pub struct RandomTrend {
+    config: RandomTrendConfig,
+    seed: Seed,
+}
+
+impl RandomTrend {
+    /// Create a new random trend transform.
+    #[must_use]
+    pub fn new(max_trend: f32) -> Self {
+        Self {
+            config: RandomTrendConfig {
+                max_trend,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomTrendConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Enable quadratic trend.
+    #[must_use]
+    pub fn with_quadratic(mut self, max_quadratic: f32) -> Self {
+        self.config.add_quadratic = true;
+        self.config.max_quadratic = max_quadratic;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomTrend {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Generate random trend for each sample and variable
+        let mut trend_values: Vec<f32> = Vec::with_capacity(batch_size * n_vars * seq_len);
+
+        for _b in 0..batch_size {
+            for _v in 0..n_vars {
+                // Random linear slope
+                let slope = rng.gen_range(-self.config.max_trend..=self.config.max_trend);
+
+                // Optional quadratic coefficient
+                let quad = if self.config.add_quadratic {
+                    rng.gen_range(-self.config.max_quadratic..=self.config.max_quadratic)
+                } else {
+                    0.0
+                };
+
+                for t in 0..seq_len {
+                    let t_norm = t as f32 / seq_len.max(1) as f32;
+                    let trend = slope * t_norm + quad * t_norm * t_norm;
+                    trend_values.push(trend);
+                }
+            }
+        }
+
+        let trend_tensor: Tensor<B, 3> = Tensor::<B, 1>::from_floats(trend_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        let x = batch.x.into_inner();
+        let result = x + trend_tensor;
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomTrend"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSTimeStepOut: Random time step dropout
+// =============================================================================
+
+/// Configuration for time step dropout augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeStepOutConfig {
+    /// Probability of dropping each time step.
+    pub drop_prob: f32,
+    /// Value to replace dropped steps with (None = use previous value).
+    pub fill_value: Option<f32>,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for TimeStepOutConfig {
+    fn default() -> Self {
+        Self {
+            drop_prob: 0.1,
+            fill_value: None,
+            p: 0.5,
+        }
+    }
+}
+
+/// Time step dropout augmentation.
+///
+/// Randomly drops time steps and fills with a constant or previous value.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::TimeStepOut;
+///
+/// // Drop 10% of time steps, fill with 0
+/// let transform = TimeStepOut::new(0.1).with_fill_value(0.0);
+///
+/// // Drop 15% of time steps, fill with previous value
+/// let transform = TimeStepOut::new(0.15);
+/// ```
+pub struct TimeStepOut {
+    config: TimeStepOutConfig,
+    seed: Seed,
+}
+
+impl TimeStepOut {
+    /// Create a new time step dropout transform.
+    #[must_use]
+    pub fn new(drop_prob: f32) -> Self {
+        Self {
+            config: TimeStepOutConfig {
+                drop_prob,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: TimeStepOutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set fill value for dropped steps.
+    #[must_use]
+    pub fn with_fill_value(mut self, value: f32) -> Self {
+        self.config.fill_value = Some(value);
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for TimeStepOut {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = x_values.clone();
+
+        for b in 0..batch_size {
+            // Generate dropout mask for this sample (same mask for all vars)
+            let mut drop_mask: Vec<bool> = Vec::with_capacity(seq_len);
+            for _ in 0..seq_len {
+                drop_mask.push(rng.gen::<f32>() < self.config.drop_prob);
+            }
+
+            for v in 0..n_vars {
+                for t in 0..seq_len {
+                    if drop_mask[t] {
+                        let idx = b * n_vars * seq_len + v * seq_len + t;
+                        let fill = if let Some(val) = self.config.fill_value {
+                            val
+                        } else {
+                            // Use previous value (or first value if t=0)
+                            let prev_t = if t > 0 { t - 1 } else { 0 };
+                            let prev_idx = b * n_vars * seq_len + v * seq_len + prev_t;
+                            x_values[prev_idx]
+                        };
+                        result_values[idx] = fill;
+                    }
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "TimeStepOut"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSShuffleSteps: Shuffle time steps within segments
+// =============================================================================
+
+/// Configuration for shuffle steps augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShuffleStepsConfig {
+    /// Number of segments to divide the sequence into.
+    pub n_segments: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for ShuffleStepsConfig {
+    fn default() -> Self {
+        Self {
+            n_segments: 5,
+            p: 0.5,
+        }
+    }
+}
+
+/// Shuffle steps within segments augmentation.
+///
+/// Divides the time series into segments and shuffles steps within each segment.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::ShuffleSteps;
+///
+/// // Shuffle steps within 5 segments
+/// let transform = ShuffleSteps::new(5);
+/// ```
+pub struct ShuffleSteps {
+    config: ShuffleStepsConfig,
+    seed: Seed,
+}
+
+impl ShuffleSteps {
+    /// Create a new shuffle steps transform.
+    #[must_use]
+    pub fn new(n_segments: usize) -> Self {
+        Self {
+            config: ShuffleStepsConfig {
+                n_segments,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: ShuffleStepsConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for ShuffleSteps {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * seq_len];
+
+        let n_segments = self.config.n_segments.max(1);
+        let segment_len = seq_len / n_segments;
+
+        for b in 0..batch_size {
+            // Create shuffled indices for each segment
+            let mut shuffled_indices: Vec<usize> = Vec::with_capacity(seq_len);
+
+            for seg in 0..n_segments {
+                let start = seg * segment_len;
+                let end = if seg == n_segments - 1 { seq_len } else { start + segment_len };
+
+                let mut segment_indices: Vec<usize> = (start..end).collect();
+                segment_indices.shuffle(&mut rng);
+                shuffled_indices.extend(segment_indices);
+            }
+
+            // Apply shuffled indices to all variables
+            for v in 0..n_vars {
+                for (new_t, &old_t) in shuffled_indices.iter().enumerate() {
+                    let src_idx = b * n_vars * seq_len + v * seq_len + old_t;
+                    let dst_idx = b * n_vars * seq_len + v * seq_len + new_t;
+                    result_values[dst_idx] = x_values[src_idx];
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "ShuffleSteps"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

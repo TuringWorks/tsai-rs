@@ -14,8 +14,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 37 architectures | **93%** |
-| **Augmentation Transforms** | 40+ transforms | 32 transforms | **80%** |
+| **Models** | 40+ architectures | 38 architectures | **95%** |
+| **Augmentation Transforms** | 40+ transforms | 35 transforms | **88%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
 | **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
@@ -26,7 +26,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~93%**
+**Overall Feature Parity: ~95%**
 
 ---
 
@@ -98,15 +98,15 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-------|---------------|----------------|--------|-------|
 | MLP | ✅ | ✅ | **FIT** | Multilayer Perceptron with optional BN |
 | gMLP | ✅ | ✅ | **FIT** | Gated MLP with spatial gating |
-| TabModel | ✅ | ❌ | **GAP** | Tabular model |
+| TabModel | ✅ | ✅ | **FIT** | MLP-based tabular model |
 | MultiInputNet | ✅ | ❌ | **GAP** | Multi-modal |
 | XResNet1d | ✅ | ❌ | **GAP** | XResNet for 1D |
 
 ### Model Gap Summary
 
-- **Implemented:** 37 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, MLP, LSTM, GRU)
-- **Missing:** 3+ models
-- **Priority Gaps:** TabModel, MultiInputNet, XResNet1d
+- **Implemented:** 38 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, TSSequencerPlus, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, GatedTabTransformer, TabModel, MLP, LSTM, GRU)
+- **Missing:** 2+ models
+- **Priority Gaps:** MultiInputNet, XResNet1d
 
 ---
 
@@ -118,7 +118,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-----------|---------------|----------------|--------|-------|
 | TSIdentity | ✅ | ✅ | **FIT** | Identity transform |
 | TSShuffle_HLs | ✅ | ❌ | **GAP** | OHLC shuffle |
-| TSShuffleSteps | ✅ | ❌ | **GAP** | Step shuffling |
+| TSShuffleSteps | ✅ | ✅ | **FIT** | Shuffle within segments |
 
 ### 2.2 Noise & Distortion
 
@@ -139,7 +139,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSWindowWarp | ✅ | ✅ | **FIT** | Window warping |
 | TSMagScale | ✅ | ✅ | **FIT** | Magnitude scaling |
 | TSMagScalePerVar | ✅ | ✅ | **FIT** | Per-variable independent scaling |
-| TSRandomTrend | ✅ | ❌ | **GAP** | Random trend |
+| TSRandomTrend | ✅ | ✅ | **FIT** | Linear/quadratic trend |
 
 ### 2.4 Temporal Transformations
 
@@ -178,7 +178,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
 | TSCutOut | ✅ | ✅ | **FIT** | CutOut fully implemented |
-| TSTimeStepOut | ✅ | ❌ | **GAP** | Step dropout |
+| TSTimeStepOut | ✅ | ✅ | **FIT** | Random time step dropout |
 | TSVarOut | ✅ | ✅ | **FIT** | Variable (channel) dropout |
 | TSMaskOut | ✅ | ✅ | **FIT** | Random scattered time step masking |
 | TSInputDropout | ✅ | ❌ | **GAP** | Input dropout |
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 32 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar)
-- **Missing:** 8+ transforms
-- **Priority Gaps:** TSRandomTrend, TSTimeStepOut, advanced resampling
+- **Implemented:** 35 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps)
+- **Missing:** 5+ transforms
+- **Priority Gaps:** Advanced resampling, TSTranslateX
 
 ---
 
@@ -411,12 +411,12 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 ### High Priority (Core Functionality)
 
 1. **Models to Add:**
-   - TabModel (simple tabular model)
    - MultiInputNet (multi-modal)
+   - XResNet1d
 
 2. **Transforms to Add:**
-   - TSRandomTrend
-   - TSTimeStepOut
+   - TSTranslateX
+   - TSWindowSlicing
 
 3. **Training Infrastructure:**
    - WeightedPerSampleLoss callback
@@ -428,9 +428,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
    - ResCNN
 
 5. **Transforms:**
-   - TSRandomTrend
-   - TSTimeStepOut
-   - TSShuffleSteps
+   - TSRandomTimeScale
+   - TSDownUpScale
+   - TSResampleSteps
 
 6. **Training:**
    - MaskedLossWrapper
@@ -492,10 +492,10 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ## 12. Conclusion
 
-tsai-rs provides a solid foundation with approximately **93% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
+tsai-rs provides a solid foundation with approximately **95% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
-1. **Model diversity** - 37 of 40+ models implemented (~93%)
-2. **Augmentation transforms** - 32 of 40+ transforms implemented (~80%)
+1. **Model diversity** - 38 of 40+ models implemented (~95%)
+2. **Augmentation transforms** - 35 of 40+ transforms implemented (~88%)
 3. **Callbacks** - 10 of 10+ callbacks implemented (~100%)
 
 The Rust implementation benefits from:
@@ -507,9 +507,9 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add TabModel (simple tabular model)
+1. Add MultiInputNet (multi-modal model)
 2. Add UEA dataset auto-download
-3. Add more augmentation transforms (TSRandomTrend, TSTimeStepOut)
+3. Add remaining augmentation transforms (TSTranslateX, TSWindowSlicing)
 4. Add ONNX export support
 5. Complete integrated gradients explainability
 

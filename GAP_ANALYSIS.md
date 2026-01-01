@@ -15,7 +15,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
 | **Models** | 40+ architectures | 37 architectures | **93%** |
-| **Augmentation Transforms** | 40+ transforms | 29 transforms | **73%** |
+| **Augmentation Transforms** | 40+ transforms | 32 transforms | **80%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
 | **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
@@ -138,7 +138,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSTimeWarp | ✅ | ✅ | **FIT** | Time warping with linear interpolation |
 | TSWindowWarp | ✅ | ✅ | **FIT** | Window warping |
 | TSMagScale | ✅ | ✅ | **FIT** | Magnitude scaling |
-| TSMagScalePerVar | ✅ | ❌ | **GAP** | Per-variable scaling |
+| TSMagScalePerVar | ✅ | ✅ | **FIT** | Per-variable independent scaling |
 | TSRandomTrend | ✅ | ❌ | **GAP** | Random trend |
 
 ### 2.4 Temporal Transformations
@@ -170,8 +170,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 |-----------|---------------|----------------|--------|-------|
 | TSRandomResizedCrop | ✅ | ✅ | **FIT** | Random crop + resize with interpolation |
 | TSWindowSlicing | ✅ | ❌ | **GAP** | Window slicing |
-| TSRandomZoomOut | ✅ | ❌ | **GAP** | Zoom out |
-| TSRandomCropPad | ✅ | ❌ | **GAP** | Crop and pad |
+| TSRandomZoomOut | ✅ | ✅ | **FIT** | Shrink and center-pad |
+| TSRandomCropPad | ✅ | ✅ | **FIT** | Random crop with padding |
 
 ### 2.7 Masking & Dropout
 
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 29 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv)
-- **Missing:** 11+ transforms
-- **Priority Gaps:** Advanced wavelet transforms, TSRandomCropPad
+- **Implemented:** 32 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar)
+- **Missing:** 8+ transforms
+- **Priority Gaps:** TSRandomTrend, TSTimeStepOut, advanced resampling
 
 ---
 
@@ -415,8 +415,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
    - MultiInputNet (multi-modal)
 
 2. **Transforms to Add:**
-   - TSRandomCropPad
-   - TSRandomZoomOut
+   - TSRandomTrend
+   - TSTimeStepOut
 
 3. **Training Infrastructure:**
    - WeightedPerSampleLoss callback
@@ -428,9 +428,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
    - ResCNN
 
 5. **Transforms:**
-   - TSMagScalePerVar
    - TSRandomTrend
    - TSTimeStepOut
+   - TSShuffleSteps
 
 6. **Training:**
    - MaskedLossWrapper
@@ -495,7 +495,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 tsai-rs provides a solid foundation with approximately **93% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
 1. **Model diversity** - 37 of 40+ models implemented (~93%)
-2. **Augmentation transforms** - 29 of 40+ transforms implemented (~73%)
+2. **Augmentation transforms** - 32 of 40+ transforms implemented (~80%)
 3. **Callbacks** - 10 of 10+ callbacks implemented (~100%)
 
 The Rust implementation benefits from:
@@ -509,7 +509,7 @@ The Rust implementation benefits from:
 **Recommended next steps:**
 1. Add TabModel (simple tabular model)
 2. Add UEA dataset auto-download
-3. Add more augmentation transforms (TSRandomCropPad, TSMagScalePerVar)
+3. Add more augmentation transforms (TSRandomTrend, TSTimeStepOut)
 4. Add ONNX export support
 5. Complete integrated gradients explainability
 

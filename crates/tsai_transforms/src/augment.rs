@@ -4565,6 +4565,516 @@ impl<B: Backend> Transform<B> for RandomConv {
     }
 }
 
+// =============================================================================
+// TSRandomCropPad: Random crop with padding
+// =============================================================================
+
+/// Configuration for random crop and pad augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomCropPadConfig {
+    /// Target length after crop/pad (None = use original length).
+    pub target_len: Option<usize>,
+    /// Minimum crop ratio (0.0-1.0).
+    pub min_crop_ratio: f32,
+    /// Maximum crop ratio (0.0-1.0).
+    pub max_crop_ratio: f32,
+    /// Padding value.
+    pub pad_value: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomCropPadConfig {
+    fn default() -> Self {
+        Self {
+            target_len: None,
+            min_crop_ratio: 0.5,
+            max_crop_ratio: 1.0,
+            pad_value: 0.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random crop and pad transform.
+///
+/// Randomly crops a portion of the time series and pads back
+/// to the original (or target) length.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomCropPad;
+///
+/// // Random crop between 50% and 100% of sequence, pad back
+/// let transform = RandomCropPad::new(0.5, 1.0);
+/// ```
+pub struct RandomCropPad {
+    config: RandomCropPadConfig,
+    seed: Seed,
+}
+
+impl RandomCropPad {
+    /// Create a new random crop and pad transform.
+    #[must_use]
+    pub fn new(min_crop_ratio: f32, max_crop_ratio: f32) -> Self {
+        Self {
+            config: RandomCropPadConfig {
+                min_crop_ratio,
+                max_crop_ratio,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomCropPadConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set target length.
+    #[must_use]
+    pub fn with_target_len(mut self, len: usize) -> Self {
+        self.config.target_len = Some(len);
+        self
+    }
+
+    /// Set padding value.
+    #[must_use]
+    pub fn with_pad_value(mut self, value: f32) -> Self {
+        self.config.pad_value = value;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomCropPad {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        let target_len = self.config.target_len.unwrap_or(seq_len);
+
+        // Random crop ratio
+        let crop_ratio = rng.gen_range(self.config.min_crop_ratio..=self.config.max_crop_ratio);
+        let crop_len = ((seq_len as f32 * crop_ratio) as usize).max(1);
+
+        // Random crop start position
+        let max_start = seq_len.saturating_sub(crop_len);
+        let start = if max_start > 0 {
+            rng.gen_range(0..=max_start)
+        } else {
+            0
+        };
+
+        // Extract cropped portion
+        let x = batch.x.into_inner();
+        let cropped = x.slice([0..batch_size, 0..n_vars, start..start + crop_len]);
+
+        // Pad or resize to target length
+        let result = if crop_len < target_len {
+            // Need to pad
+            let pad_len = target_len - crop_len;
+            let pad_before = pad_len / 2;
+            let _pad_after = pad_len - pad_before;
+
+            // Create padded tensor
+            let pad_value = self.config.pad_value;
+            let _full_tensor: Tensor<B, 3> = Tensor::full([batch_size, n_vars, target_len], pad_value, &device);
+
+            // Copy cropped data into the middle
+            // Using slice assignment would be ideal but we'll reconstruct
+            let mut values: Vec<f32> = vec![pad_value; batch_size * n_vars * target_len];
+            let cropped_data = cropped.to_data();
+            let cropped_values: Vec<f32> = cropped_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+            for b in 0..batch_size {
+                for v in 0..n_vars {
+                    for t in 0..crop_len {
+                        let src_idx = b * n_vars * crop_len + v * crop_len + t;
+                        let dst_idx = b * n_vars * target_len + v * target_len + (pad_before + t);
+                        if src_idx < cropped_values.len() && dst_idx < values.len() {
+                            values[dst_idx] = cropped_values[src_idx];
+                        }
+                    }
+                }
+            }
+
+            Tensor::<B, 1>::from_floats(values.as_slice(), &device)
+                .reshape([batch_size, n_vars, target_len])
+        } else if crop_len > target_len {
+            // Need to subsample/resize (simple linear interpolation)
+            let mut values: Vec<f32> = vec![0.0; batch_size * n_vars * target_len];
+            let cropped_data = cropped.to_data();
+            let cropped_values: Vec<f32> = cropped_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+            for b in 0..batch_size {
+                for v in 0..n_vars {
+                    for t in 0..target_len {
+                        let src_t = t as f32 * (crop_len - 1) as f32 / (target_len - 1).max(1) as f32;
+                        let t0 = src_t.floor() as usize;
+                        let t1 = (t0 + 1).min(crop_len - 1);
+                        let frac = src_t - t0 as f32;
+
+                        let src_idx0 = b * n_vars * crop_len + v * crop_len + t0;
+                        let src_idx1 = b * n_vars * crop_len + v * crop_len + t1;
+                        let dst_idx = b * n_vars * target_len + v * target_len + t;
+
+                        if src_idx0 < cropped_values.len() && src_idx1 < cropped_values.len() && dst_idx < values.len() {
+                            values[dst_idx] = cropped_values[src_idx0] * (1.0 - frac) + cropped_values[src_idx1] * frac;
+                        }
+                    }
+                }
+            }
+
+            Tensor::<B, 1>::from_floats(values.as_slice(), &device)
+                .reshape([batch_size, n_vars, target_len])
+        } else {
+            cropped
+        };
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomCropPad"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSRandomZoomOut: Random zoom out (shrink and pad)
+// =============================================================================
+
+/// Configuration for random zoom out augmentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomZoomOutConfig {
+    /// Minimum zoom ratio (0.0-1.0, where 0.5 means shrink to half).
+    pub min_zoom: f32,
+    /// Maximum zoom ratio (0.0-1.0).
+    pub max_zoom: f32,
+    /// Padding value for the zoomed-out regions.
+    pub pad_value: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomZoomOutConfig {
+    fn default() -> Self {
+        Self {
+            min_zoom: 0.5,
+            max_zoom: 1.0,
+            pad_value: 0.0,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random zoom out transform.
+///
+/// Shrinks the time series and pads to maintain original length.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::RandomZoomOut;
+///
+/// // Random zoom between 50% and 100%
+/// let transform = RandomZoomOut::new(0.5, 1.0);
+/// ```
+pub struct RandomZoomOut {
+    config: RandomZoomOutConfig,
+    seed: Seed,
+}
+
+impl RandomZoomOut {
+    /// Create a new random zoom out transform.
+    #[must_use]
+    pub fn new(min_zoom: f32, max_zoom: f32) -> Self {
+        Self {
+            config: RandomZoomOutConfig {
+                min_zoom,
+                max_zoom,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomZoomOutConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set padding value.
+    #[must_use]
+    pub fn with_pad_value(mut self, value: f32) -> Self {
+        self.config.pad_value = value;
+        self
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomZoomOut {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Random zoom ratio
+        let zoom = rng.gen_range(self.config.min_zoom..=self.config.max_zoom);
+        if zoom >= 0.99 {
+            return Ok(batch);
+        }
+
+        let zoomed_len = ((seq_len as f32 * zoom) as usize).max(1);
+
+        // Subsample original to zoomed_len using linear interpolation
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data.to_vec().map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values: Vec<f32> = vec![self.config.pad_value; batch_size * n_vars * seq_len];
+
+        // Center the zoomed content
+        let pad_before = (seq_len - zoomed_len) / 2;
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                for t in 0..zoomed_len {
+                    // Map from zoomed position to original position
+                    let src_t = t as f32 * (seq_len - 1) as f32 / (zoomed_len - 1).max(1) as f32;
+                    let t0 = src_t.floor() as usize;
+                    let t1 = (t0 + 1).min(seq_len - 1);
+                    let frac = src_t - t0 as f32;
+
+                    let src_idx0 = b * n_vars * seq_len + v * seq_len + t0;
+                    let src_idx1 = b * n_vars * seq_len + v * seq_len + t1;
+                    let dst_idx = b * n_vars * seq_len + v * seq_len + (pad_before + t);
+
+                    if src_idx0 < x_values.len() && src_idx1 < x_values.len() && dst_idx < result_values.len() {
+                        result_values[dst_idx] = x_values[src_idx0] * (1.0 - frac) + x_values[src_idx1] * frac;
+                    }
+                }
+            }
+        }
+
+        let result: Tensor<B, 3> = Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+            .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomZoomOut"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+// =============================================================================
+// TSMagScalePerVar: Per-variable magnitude scaling
+// =============================================================================
+
+/// Configuration for per-variable magnitude scaling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagScalePerVarConfig {
+    /// Minimum scaling factor.
+    pub min_scale: f32,
+    /// Maximum scaling factor.
+    pub max_scale: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for MagScalePerVarConfig {
+    fn default() -> Self {
+        Self {
+            min_scale: 0.8,
+            max_scale: 1.2,
+            p: 0.5,
+        }
+    }
+}
+
+/// Per-variable magnitude scaling transform.
+///
+/// Applies independent random scaling to each variable/channel.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::MagScalePerVar;
+///
+/// // Scale each variable independently by 0.8x to 1.2x
+/// let transform = MagScalePerVar::new(0.8, 1.2);
+/// ```
+pub struct MagScalePerVar {
+    config: MagScalePerVarConfig,
+    seed: Seed,
+}
+
+impl MagScalePerVar {
+    /// Create a new per-variable magnitude scale transform.
+    #[must_use]
+    pub fn new(min_scale: f32, max_scale: f32) -> Self {
+        Self {
+            config: MagScalePerVarConfig {
+                min_scale,
+                max_scale,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: MagScalePerVarConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for MagScalePerVar {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let _seq_len = shape.len();
+        let device = batch.device();
+
+        // Generate random scale for each variable in each batch sample
+        let mut scales: Vec<f32> = Vec::with_capacity(batch_size * n_vars);
+        for _ in 0..batch_size {
+            for _ in 0..n_vars {
+                scales.push(rng.gen_range(self.config.min_scale..=self.config.max_scale));
+            }
+        }
+
+        // Create scale tensor: (batch, vars, 1) for broadcasting
+        let scale_tensor: Tensor<B, 3> = Tensor::<B, 1>::from_floats(scales.as_slice(), &device)
+            .reshape([batch_size, n_vars, 1]);
+
+        // Apply scaling
+        let x = batch.x.into_inner();
+        let scaled = x * scale_tensor;
+
+        Ok(TSBatch {
+            x: TSTensor::new(scaled)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "MagScalePerVar"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

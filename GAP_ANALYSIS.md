@@ -344,7 +344,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Feature | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |---------|---------------|----------------|--------|-------|
 | UCR datasets (158) | ✅ | ✅ | **FIT** | Auto-download from timeseriesclassification.com |
-| UEA datasets (30) | ✅ | ❌ | **GAP** | Multivariate |
+| UEA datasets (30) | ✅ | ✅ | **FIT** | 30 multivariate datasets with auto-download |
 | Regression datasets (15) | ✅ | ❌ | **GAP** | External data |
 | Forecasting datasets (62) | ✅ | ❌ | **GAP** | External data |
 | Cache management | ✅ | ✅ | **FIT** | cache_dir() |
@@ -415,8 +415,8 @@ All high-priority callbacks are now implemented.
 ### Medium Priority (Enhanced Functionality)
 
 1. **Data:**
-   - UEA dataset auto-download
-   - More external datasets (regression, forecasting)
+   - Regression datasets auto-download
+   - Forecasting datasets auto-download
 
 ### Low Priority (Advanced Features)
 
@@ -484,10 +484,10 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add UEA dataset auto-download
-2. Add ONNX export support
-3. Add tsfresh feature extraction integration
-4. Add Optuna hyperparameter optimization
+1. Add ONNX export support
+2. Add tsfresh feature extraction integration
+3. Add Optuna hyperparameter optimization
+4. Add regression/forecasting dataset support
 
 ---
 

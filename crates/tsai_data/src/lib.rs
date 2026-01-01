@@ -36,6 +36,7 @@ mod loader;
 mod sampler;
 mod splits;
 pub mod ucr;
+pub mod uea;
 
 pub use dataset::{TSDataset, TSDatasets};
 pub use error::{DataError, Result};
@@ -49,6 +50,7 @@ pub use splits::{
     WalkForwardSize,
 };
 pub use ucr::{list_datasets as list_ucr_datasets, UCRDataset, UCRDatasetInfo};
+pub use uea::{list_uea_datasets, UEADataset, UEADatasetInfo};
 
 /// Cache directory for downloaded datasets.
 pub const CACHE_DIR: &str = ".cache/tsai-rs";

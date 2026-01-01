@@ -15,7 +15,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
 | **Models** | 40+ architectures | 40 architectures | **100%** |
-| **Augmentation Transforms** | 40+ transforms | 41 transforms | **100%** |
+| **Augmentation Transforms** | 40+ transforms | 44 transforms | **100%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
 | **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
@@ -156,13 +156,13 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
-| TSRandomTimeScale | ✅ | ❌ | **GAP** | Time scaling |
+| TSRandomTimeScale | ✅ | ✅ | **FIT** | Time scaling |
 | TSRandomTimeStep | ✅ | ❌ | **GAP** | Random step |
 | TSResampleSteps | ✅ | ❌ | **GAP** | Step resampling |
 | TSResize | ✅ | ✅ | **FIT** | Resize sequence |
 | TSRandomSize | ✅ | ✅ | **FIT** | Random resize |
-| TSRandomLowRes | ✅ | ❌ | **GAP** | Low resolution |
-| TSDownUpScale | ✅ | ❌ | **GAP** | Down/up scaling |
+| TSRandomLowRes | ✅ | ✅ | **FIT** | Low resolution |
+| TSDownUpScale | ✅ | ✅ | **FIT** | Down/up scaling |
 
 ### 2.6 Cropping & Slicing
 
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 41 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps, TranslateX, WindowSlicing, InputDropout, Resize, RandomSize, SelfDropout)
-- **Missing:** Advanced resampling transforms (TSRandomTimeScale, TSResampleSteps, TSDownUpScale)
-- **Priority Gaps:** Advanced resampling transforms
+- **Implemented:** 44 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps, TranslateX, WindowSlicing, InputDropout, Resize, RandomSize, SelfDropout, RandomTimeScale, DownUpScale, RandomLowRes)
+- **Missing:** TSRandomTimeStep, TSResampleSteps
+- **Priority Gaps:** Minor resampling variants
 
 ---
 
@@ -419,8 +419,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 ### Medium Priority (Enhanced Functionality)
 
 3. **Transforms:**
-   - TSRandomTimeScale
-   - TSDownUpScale
+   - TSRandomTimeStep
    - TSResampleSteps
 
 4. **Training:**
@@ -486,7 +485,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 tsai-rs provides a solid foundation with approximately **98% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
 1. **Model diversity** - 40 of 40+ models implemented (~100%)
-2. **Augmentation transforms** - 41 of 40+ transforms implemented (~100%)
+2. **Augmentation transforms** - 44 of 40+ transforms implemented (~100%)
 3. **Callbacks** - 10 of 10+ callbacks implemented (~100%)
 
 The Rust implementation benefits from:
@@ -499,10 +498,10 @@ The Rust implementation benefits from:
 
 **Recommended next steps:**
 1. Add MultiInputNet (multi-modal model)
-2. Add remaining resampling transforms (TSRandomTimeScale, TSDownUpScale)
-3. Add UEA dataset auto-download
-4. Add ONNX export support
-5. Complete integrated gradients explainability
+2. Add UEA dataset auto-download
+3. Add ONNX export support
+4. Complete integrated gradients explainability
+5. Add WeightedPerSampleLoss callback
 
 ---
 

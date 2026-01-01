@@ -6400,6 +6400,450 @@ impl<B: Backend> Transform<B> for SelfDropout {
     }
 }
 
+/// Configuration for TSRandomTimeScale transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomTimeScaleConfig {
+    /// Minimum scale factor (e.g., 0.5 = 50% speed).
+    pub min_scale: f32,
+    /// Maximum scale factor (e.g., 2.0 = 200% speed).
+    pub max_scale: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomTimeScaleConfig {
+    fn default() -> Self {
+        Self {
+            min_scale: 0.8,
+            max_scale: 1.2,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random time scale transform for time series.
+///
+/// Randomly speeds up or slows down the time series by resampling.
+/// A scale > 1.0 speeds up (fewer samples), < 1.0 slows down (more samples).
+/// The output is resized back to the original length.
+pub struct RandomTimeScale {
+    config: RandomTimeScaleConfig,
+    seed: Seed,
+}
+
+impl RandomTimeScale {
+    /// Create a new random time scale transform.
+    #[must_use]
+    pub fn new(min_scale: f32, max_scale: f32) -> Self {
+        Self {
+            config: RandomTimeScaleConfig {
+                min_scale,
+                max_scale,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomTimeScaleConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate(values: &[f32], src_len: usize, target_len: usize) -> Vec<f32> {
+        if src_len == target_len || target_len < 2 {
+            return values[..target_len.min(values.len())].to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (src_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(src_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(src_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomTimeScale {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        // Random scale for this batch
+        let scale = rng.gen::<f32>() * (self.config.max_scale - self.config.min_scale)
+            + self.config.min_scale;
+        let scaled_len = ((orig_len as f32 / scale) as usize).max(2);
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * orig_len + v * orig_len;
+                let series: Vec<f32> = x_values[start..start + orig_len].to_vec();
+
+                // Resample to scaled length, then back to original
+                let scaled = Self::interpolate(&series, orig_len, scaled_len);
+                let final_series = Self::interpolate(&scaled, scaled_len, orig_len);
+
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomTimeScale"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for TSDownUpScale transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownUpScaleConfig {
+    /// Scale factor (fraction to downsample to, e.g., 0.5 = half resolution).
+    pub scale: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for DownUpScaleConfig {
+    fn default() -> Self {
+        Self { scale: 0.5, p: 0.5 }
+    }
+}
+
+/// Down-up scale transform for time series.
+///
+/// Downsamples the time series to a lower resolution, then upsamples back
+/// to the original length. This creates a smoothed/blurred effect.
+pub struct DownUpScale {
+    config: DownUpScaleConfig,
+    seed: Seed,
+}
+
+impl DownUpScale {
+    /// Create a new down-up scale transform.
+    #[must_use]
+    pub fn new(scale: f32) -> Self {
+        Self {
+            config: DownUpScaleConfig {
+                scale,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: DownUpScaleConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate(values: &[f32], src_len: usize, target_len: usize) -> Vec<f32> {
+        if src_len == target_len || target_len < 2 {
+            return values[..target_len.min(values.len())].to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (src_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(src_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(src_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for DownUpScale {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        let down_len = ((orig_len as f32 * self.config.scale) as usize).max(2);
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * orig_len + v * orig_len;
+                let series: Vec<f32> = x_values[start..start + orig_len].to_vec();
+
+                // Downsample then upsample
+                let down = Self::interpolate(&series, orig_len, down_len);
+                let final_series = Self::interpolate(&down, down_len, orig_len);
+
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "DownUpScale"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for TSRandomLowRes transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomLowResConfig {
+    /// Minimum resolution scale (e.g., 0.3 = 30% resolution).
+    pub min_scale: f32,
+    /// Maximum resolution scale (e.g., 0.7 = 70% resolution).
+    pub max_scale: f32,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomLowResConfig {
+    fn default() -> Self {
+        Self {
+            min_scale: 0.3,
+            max_scale: 0.7,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random low resolution transform for time series.
+///
+/// Randomly downsamples to a lower resolution and upsamples back.
+/// Similar to DownUpScale but with randomized scale.
+pub struct RandomLowRes {
+    config: RandomLowResConfig,
+    seed: Seed,
+}
+
+impl RandomLowRes {
+    /// Create a new random low res transform.
+    #[must_use]
+    pub fn new(min_scale: f32, max_scale: f32) -> Self {
+        Self {
+            config: RandomLowResConfig {
+                min_scale,
+                max_scale,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomLowResConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate(values: &[f32], src_len: usize, target_len: usize) -> Vec<f32> {
+        if src_len == target_len || target_len < 2 {
+            return values[..target_len.min(values.len())].to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (src_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(src_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(src_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomLowRes {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        // Random scale for this batch
+        let scale = rng.gen::<f32>() * (self.config.max_scale - self.config.min_scale)
+            + self.config.min_scale;
+        let down_len = ((orig_len as f32 * scale) as usize).max(2);
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * orig_len + v * orig_len;
+                let series: Vec<f32> = x_values[start..start + orig_len].to_vec();
+
+                // Downsample to random lower resolution, then back up
+                let down = Self::interpolate(&series, orig_len, down_len);
+                let final_series = Self::interpolate(&down, down_len, orig_len);
+
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomLowRes"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

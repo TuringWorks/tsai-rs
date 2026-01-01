@@ -340,6 +340,269 @@ impl LogCoshLoss {
     }
 }
 
+/// Center Loss for learning discriminative features.
+///
+/// Minimizes intra-class variance by penalizing the distance between
+/// features and their class centers. Often used together with cross-entropy
+/// for improved feature discrimination.
+///
+/// L_center = (1/2) * sum(||f_i - c_{y_i}||^2)
+///
+/// Reference: "A Discriminative Feature Learning Approach for Deep Face Recognition"
+/// by Wen et al. (2016)
+#[derive(Debug)]
+pub struct CenterLoss {
+    /// Number of classes.
+    num_classes: usize,
+    /// Feature dimension.
+    feature_dim: usize,
+    /// Learning rate for center updates.
+    alpha: f32,
+    /// Class centers (num_classes, feature_dim).
+    centers: Vec<Vec<f32>>,
+}
+
+impl CenterLoss {
+    /// Create a new Center Loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_classes` - Number of classes
+    /// * `feature_dim` - Dimension of feature embeddings
+    /// * `alpha` - Learning rate for center updates (default: 0.5)
+    pub fn new(num_classes: usize, feature_dim: usize) -> Self {
+        // Initialize centers to zeros
+        let centers = vec![vec![0.0f32; feature_dim]; num_classes];
+        Self {
+            num_classes,
+            feature_dim,
+            alpha: 0.5,
+            centers,
+        }
+    }
+
+    /// Set the center update learning rate.
+    #[must_use]
+    pub fn with_alpha(mut self, alpha: f32) -> Self {
+        self.alpha = alpha;
+        self
+    }
+
+    /// Compute center loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `features` - Feature embeddings of shape (batch, feature_dim)
+    /// * `targets` - Class labels of shape (batch,)
+    ///
+    /// # Returns
+    ///
+    /// Scalar loss tensor of shape (1,)
+    pub fn forward<B: Backend>(
+        &mut self,
+        features: Tensor<B, 2>,
+        targets: Tensor<B, 1, Int>,
+    ) -> Tensor<B, 1> {
+        let device = features.device();
+        let [batch_size, feat_dim] = features.dims();
+
+        assert_eq!(
+            feat_dim, self.feature_dim,
+            "Feature dimension mismatch: expected {}, got {}",
+            self.feature_dim, feat_dim
+        );
+
+        let features_data: Vec<f32> = features.clone().into_data().to_vec().unwrap();
+        let targets_data: Vec<i64> = targets.into_data().to_vec().unwrap();
+
+        let mut total_loss = 0.0f32;
+        let mut center_updates: Vec<Vec<f32>> = vec![vec![0.0f32; self.feature_dim]; self.num_classes];
+        let mut class_counts: Vec<usize> = vec![0; self.num_classes];
+
+        // Compute loss and accumulate center updates
+        for i in 0..batch_size {
+            let class_idx = targets_data[i] as usize;
+            if class_idx >= self.num_classes {
+                continue;
+            }
+
+            class_counts[class_idx] += 1;
+
+            // Compute distance to center
+            let mut dist_sq = 0.0f32;
+            for j in 0..self.feature_dim {
+                let diff = features_data[i * self.feature_dim + j] - self.centers[class_idx][j];
+                dist_sq += diff * diff;
+                // Accumulate updates
+                center_updates[class_idx][j] += diff;
+            }
+
+            total_loss += 0.5 * dist_sq;
+        }
+
+        // Update centers
+        for c in 0..self.num_classes {
+            if class_counts[c] > 0 {
+                let count = class_counts[c] as f32;
+                for j in 0..self.feature_dim {
+                    self.centers[c][j] += self.alpha * center_updates[c][j] / count;
+                }
+            }
+        }
+
+        let mean_loss = total_loss / batch_size as f32;
+        Tensor::<B, 1>::from_floats([mean_loss], &device)
+    }
+
+    /// Get current class centers.
+    pub fn get_centers(&self) -> &Vec<Vec<f32>> {
+        &self.centers
+    }
+
+    /// Reset centers to zeros.
+    pub fn reset_centers(&mut self) {
+        self.centers = vec![vec![0.0f32; self.feature_dim]; self.num_classes];
+    }
+}
+
+/// Loss type for MaskedLossWrapper.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum BaseLossType {
+    /// Mean Squared Error loss.
+    #[default]
+    MSE,
+    /// Huber loss.
+    Huber,
+    /// Log-Cosh loss.
+    LogCosh,
+}
+
+/// Masked Loss Wrapper for handling NaN values.
+///
+/// Wraps a base loss function and masks out NaN values in predictions
+/// or targets before computing the loss. Useful for time series with
+/// missing values or partial supervision.
+#[derive(Debug)]
+pub struct MaskedLossWrapper {
+    /// Base loss type.
+    loss_type: BaseLossType,
+    /// Huber delta (only used if loss_type is Huber).
+    huber_delta: f32,
+}
+
+impl MaskedLossWrapper {
+    /// Create a new masked loss wrapper with MSE as base loss.
+    pub fn new() -> Self {
+        Self {
+            loss_type: BaseLossType::MSE,
+            huber_delta: 1.0,
+        }
+    }
+
+    /// Create with a specific base loss type.
+    #[must_use]
+    pub fn with_loss_type(mut self, loss_type: BaseLossType) -> Self {
+        self.loss_type = loss_type;
+        self
+    }
+
+    /// Set Huber delta (only applies if using Huber loss).
+    #[must_use]
+    pub fn with_huber_delta(mut self, delta: f32) -> Self {
+        self.huber_delta = delta;
+        self
+    }
+
+    /// Compute masked loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `preds` - Predictions of shape (batch, features)
+    /// * `targets` - Targets of shape (batch, features)
+    ///
+    /// # Returns
+    ///
+    /// Scalar loss tensor. Returns 0 if all values are masked.
+    pub fn forward<B: Backend>(&self, preds: Tensor<B, 2>, targets: Tensor<B, 2>) -> Tensor<B, 1> {
+        let device = preds.device();
+
+        let preds_data: Vec<f32> = preds.into_data().to_vec().unwrap();
+        let targets_data: Vec<f32> = targets.into_data().to_vec().unwrap();
+
+        // Filter out NaN values
+        let valid_pairs: Vec<(f32, f32)> = preds_data
+            .iter()
+            .zip(&targets_data)
+            .filter(|(&p, &t)| !p.is_nan() && !t.is_nan())
+            .map(|(&p, &t)| (p, t))
+            .collect();
+
+        if valid_pairs.is_empty() {
+            return Tensor::<B, 1>::from_floats([0.0], &device);
+        }
+
+        let n = valid_pairs.len() as f32;
+
+        let loss = match self.loss_type {
+            BaseLossType::MSE => {
+                let sum: f32 = valid_pairs.iter().map(|(p, t)| (p - t).powi(2)).sum();
+                sum / n
+            }
+            BaseLossType::Huber => {
+                let delta = self.huber_delta;
+                let half_delta_sq = 0.5 * delta * delta;
+                let sum: f32 = valid_pairs
+                    .iter()
+                    .map(|(p, t)| {
+                        let diff = (p - t).abs();
+                        if diff <= delta {
+                            0.5 * diff * diff
+                        } else {
+                            delta * diff - half_delta_sq
+                        }
+                    })
+                    .sum();
+                sum / n
+            }
+            BaseLossType::LogCosh => {
+                let sum: f32 = valid_pairs
+                    .iter()
+                    .map(|(p, t)| {
+                        let x = p - t;
+                        let abs_x = x.abs();
+                        abs_x + (1.0 + (-2.0 * abs_x).exp()).ln() - std::f32::consts::LN_2
+                    })
+                    .sum();
+                sum / n
+            }
+        };
+
+        Tensor::<B, 1>::from_floats([loss], &device)
+    }
+
+    /// Get the fraction of valid (non-NaN) values.
+    pub fn get_valid_fraction(preds: &[f32], targets: &[f32]) -> f32 {
+        let total = preds.len().min(targets.len());
+        if total == 0 {
+            return 0.0;
+        }
+
+        let valid_count = preds
+            .iter()
+            .zip(targets)
+            .filter(|(&p, &t)| !p.is_nan() && !t.is_nan())
+            .count();
+
+        valid_count as f32 / total as f32
+    }
+}
+
+impl Default for MaskedLossWrapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

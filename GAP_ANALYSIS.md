@@ -17,8 +17,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Models** | 40+ architectures | 41 architectures | **100%** |
 | **Augmentation Transforms** | 40+ transforms | 46 transforms | **100%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
-| **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
-| **Loss Functions** | 7+ custom losses | 6 losses | **86%** |
+| **Imaging Transforms** | 7 transforms | 5 transforms | **71%** |
+| **Loss Functions** | 7+ custom losses | 8 losses | **100%** |
 | **Metrics** | 10+ metrics | 10 metrics | **100%** |
 | **Callbacks** | 10+ callbacks | 10 callbacks | **100%** |
 | **Schedulers** | 8+ schedulers | 9 schedulers | **100%** |
@@ -229,7 +229,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSToGADF | ✅ | ✅ | **FIT** | Gramian Angular Difference Field |
 | TSToMTF | ✅ | ✅ | **FIT** | Markov Transition Field |
 | TSToRP | ✅ | ✅ | **FIT** | Recurrence Plot |
-| TSToJRP | ✅ | ❌ | **GAP** | Joint Recurrence Plot |
+| TSToJRP | ✅ | ✅ | **FIT** | Joint Recurrence Plot |
 | TSToPlot | ✅ | ❌ | **GAP** | Matplotlib plot |
 | TSToMat | ✅ | ❌ | **GAP** | Matrix visualization |
 
@@ -247,10 +247,10 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | FocalLoss | ✅ | ✅ | **FIT** | Class imbalance |
 | LabelSmoothingLoss | ✅ | ✅ | **FIT** | Label smoothing |
 | LogCoshLoss | ✅ | ✅ | **FIT** | Robust regression loss |
-| CenterLoss | ✅ | ❌ | **GAP** | Feature discrimination |
+| CenterLoss | ✅ | ✅ | **FIT** | Feature discrimination |
 | CenterPlusLoss | ✅ | ❌ | **GAP** | Combined center loss |
 | TweedieLoss | ✅ | ❌ | **GAP** | Probabilistic loss |
-| MaskedLossWrapper | ✅ | ❌ | **GAP** | NaN handling |
+| MaskedLossWrapper | ✅ | ✅ | **FIT** | NaN handling |
 
 ### 5.2 Metrics
 
@@ -412,13 +412,13 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 1. **Training Infrastructure:**
    - WeightedPerSampleLoss callback
-   - MaskedLossWrapper
+   - CenterPlusLoss (combined center + softmax loss)
 
 ### Medium Priority (Enhanced Functionality)
 
 2. **Training:**
-   - CenterLoss
    - RAdam/Ranger optimizers
+   - TweedieLoss
 
 3. **Data:**
    - UEA dataset auto-download
@@ -498,7 +498,7 @@ The Rust implementation benefits from:
 2. Add ONNX export support
 3. Complete integrated gradients explainability
 4. Add WeightedPerSampleLoss callback
-5. Add MaskedLossWrapper for NaN handling
+5. Add CenterPlusLoss (combined center + softmax loss)
 
 ---
 

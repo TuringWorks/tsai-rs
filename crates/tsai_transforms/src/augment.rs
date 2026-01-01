@@ -7150,6 +7150,260 @@ impl<B: Backend> Transform<B> for ResampleSteps {
     }
 }
 
+/// Configuration for OHLC High-Low shuffle transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TSShuffleHLsConfig {
+    /// Index of the High variable.
+    pub high_idx: usize,
+    /// Index of the Low variable.
+    pub low_idx: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+    /// Whether to shuffle within windows or globally.
+    pub window_size: Option<usize>,
+}
+
+impl Default for TSShuffleHLsConfig {
+    fn default() -> Self {
+        Self {
+            high_idx: 1, // Assuming OHLC order: Open=0, High=1, Low=2, Close=3
+            low_idx: 2,
+            p: 0.5,
+            window_size: None,
+        }
+    }
+}
+
+/// Shuffles High and Low values in OHLC time series data.
+///
+/// This transform is designed for financial time series with OHLC
+/// (Open, High, Low, Close) structure. It randomly shuffles the
+/// High and Low values while preserving their relationship
+/// (High >= Low) to create augmented data.
+///
+/// This augmentation helps models generalize better by:
+/// - Creating variations that preserve the candle structure
+/// - Reducing overfitting to specific high/low patterns
+/// - Maintaining the essential price range information
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tsai_transforms::augment::TSShuffleHLs;
+///
+/// // For standard OHLC data (High=1, Low=2)
+/// let transform = TSShuffleHLs::new(1, 2);
+///
+/// // With custom probability
+/// let transform = TSShuffleHLs::new(1, 2).with_probability(0.3);
+///
+/// // With windowed shuffling
+/// let transform = TSShuffleHLs::new(1, 2).with_window_size(10);
+/// ```
+pub struct TSShuffleHLs {
+    config: TSShuffleHLsConfig,
+    seed: Seed,
+}
+
+impl TSShuffleHLs {
+    /// Create a new OHLC High-Low shuffle transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `high_idx` - Index of the High variable in the multivariate series
+    /// * `low_idx` - Index of the Low variable in the multivariate series
+    #[must_use]
+    pub fn new(high_idx: usize, low_idx: usize) -> Self {
+        Self {
+            config: TSShuffleHLsConfig {
+                high_idx,
+                low_idx,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: TSShuffleHLsConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Set the probability of applying the transform.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set window size for localized shuffling.
+    ///
+    /// When set, shuffling occurs within windows of this size
+    /// rather than globally across the entire series.
+    #[must_use]
+    pub fn with_window_size(mut self, size: usize) -> Self {
+        self.config.window_size = Some(size.max(2));
+        self
+    }
+
+    /// Disable windowed shuffling (shuffle globally).
+    #[must_use]
+    pub fn global_shuffle(mut self) -> Self {
+        self.config.window_size = None;
+        self
+    }
+}
+
+impl<B: Backend> Transform<B> for TSShuffleHLs {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let seq_len = shape.len();
+        let device = batch.device();
+
+        // Validate indices
+        if self.config.high_idx >= n_vars || self.config.low_idx >= n_vars {
+            return Err(CoreError::ShapeMismatch(format!(
+                "High/Low indices ({}, {}) out of range for {} variables",
+                self.config.high_idx, self.config.low_idx, n_vars
+            )));
+        }
+
+        // Get data
+        let x_data = batch.x.into_inner().into_data();
+        let x_values: Vec<f32> = x_data
+            .as_slice()
+            .map_err(|e| CoreError::ShapeMismatch(format!("Failed to get X data: {e:?}")))?
+            .to_vec();
+
+        let mut result = x_values.clone();
+
+        // Process each sample in the batch
+        for b in 0..batch_size {
+            match self.config.window_size {
+                Some(window_size) => {
+                    // Shuffle within windows
+                    let n_windows = (seq_len + window_size - 1) / window_size;
+
+                    for w in 0..n_windows {
+                        let start = w * window_size;
+                        let end = ((w + 1) * window_size).min(seq_len);
+
+                        // Collect high and low values for this window
+                        let mut high_vals: Vec<f32> = (start..end)
+                            .map(|t| {
+                                let idx = b * n_vars * seq_len + self.config.high_idx * seq_len + t;
+                                x_values[idx]
+                            })
+                            .collect();
+
+                        let mut low_vals: Vec<f32> = (start..end)
+                            .map(|t| {
+                                let idx = b * n_vars * seq_len + self.config.low_idx * seq_len + t;
+                                x_values[idx]
+                            })
+                            .collect();
+
+                        // Shuffle within the window
+                        high_vals.shuffle(&mut rng);
+                        low_vals.shuffle(&mut rng);
+
+                        // Ensure high >= low after shuffling
+                        for i in 0..high_vals.len() {
+                            if high_vals[i] < low_vals[i] {
+                                std::mem::swap(&mut high_vals[i], &mut low_vals[i]);
+                            }
+                        }
+
+                        // Write back shuffled values
+                        for (i, t) in (start..end).enumerate() {
+                            let high_idx = b * n_vars * seq_len + self.config.high_idx * seq_len + t;
+                            let low_idx = b * n_vars * seq_len + self.config.low_idx * seq_len + t;
+                            result[high_idx] = high_vals[i];
+                            result[low_idx] = low_vals[i];
+                        }
+                    }
+                }
+                None => {
+                    // Global shuffle
+                    let mut high_vals: Vec<f32> = (0..seq_len)
+                        .map(|t| {
+                            let idx = b * n_vars * seq_len + self.config.high_idx * seq_len + t;
+                            x_values[idx]
+                        })
+                        .collect();
+
+                    let mut low_vals: Vec<f32> = (0..seq_len)
+                        .map(|t| {
+                            let idx = b * n_vars * seq_len + self.config.low_idx * seq_len + t;
+                            x_values[idx]
+                        })
+                        .collect();
+
+                    // Shuffle globally
+                    high_vals.shuffle(&mut rng);
+                    low_vals.shuffle(&mut rng);
+
+                    // Ensure high >= low after shuffling
+                    for i in 0..high_vals.len() {
+                        if high_vals[i] < low_vals[i] {
+                            std::mem::swap(&mut high_vals[i], &mut low_vals[i]);
+                        }
+                    }
+
+                    // Write back shuffled values
+                    for t in 0..seq_len {
+                        let high_idx = b * n_vars * seq_len + self.config.high_idx * seq_len + t;
+                        let low_idx = b * n_vars * seq_len + self.config.low_idx * seq_len + t;
+                        result[high_idx] = high_vals[t];
+                        result[low_idx] = low_vals[t];
+                    }
+                }
+            }
+        }
+
+        let result_tensor: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result.as_slice(), &device)
+                .reshape([batch_size, n_vars, seq_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result_tensor)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "TSShuffleHLs"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

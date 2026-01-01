@@ -15,7 +15,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
 | **Models** | 40+ architectures | 41 architectures | **100%** |
-| **Augmentation Transforms** | 40+ transforms | 46 transforms | **100%** |
+| **Augmentation Transforms** | 40+ transforms | 47 transforms | **100%** |
 | **Label Mixing** | 4 transforms | 4 transforms | **100%** |
 | **Imaging Transforms** | 7 transforms | 7 transforms | **100%** |
 | **Loss Functions** | 7+ custom losses | 10 losses | **100%** |
@@ -117,7 +117,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Transform | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-----------|---------------|----------------|--------|-------|
 | TSIdentity | ✅ | ✅ | **FIT** | Identity transform |
-| TSShuffle_HLs | ✅ | ❌ | **GAP** | OHLC shuffle |
+| TSShuffle_HLs | ✅ | ✅ | **FIT** | OHLC shuffle |
 | TSShuffleSteps | ✅ | ✅ | **FIT** | Shuffle within segments |
 
 ### 2.2 Noise & Distortion
@@ -204,9 +204,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ### Transform Gap Summary
 
-- **Implemented:** 46 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps, TranslateX, WindowSlicing, InputDropout, Resize, RandomSize, SelfDropout, RandomTimeScale, DownUpScale, RandomLowRes, RandomTimeStep, ResampleSteps)
+- **Implemented:** 47 transforms (GaussianNoise, MagScale, TimeWarp, MagWarp, WindowWarp, CutOut, HorizontalFlip, RandomShift, Permutation, Rotation, FrequencyMask, TimeMask, SpecAugment, TSRandomShift, TSHorizontalFlip, TSVerticalFlip, Identity, Compose, MagAddNoise, MagMulNoise, MaskOut, VarOut, RandomResizedCrop, RandAugment, TimeNoise, Blur, Smooth, RandomFreqNoise, FreqDenoise, RandomConv, RandomCropPad, RandomZoomOut, MagScalePerVar, RandomTrend, TimeStepOut, ShuffleSteps, ShuffleHLs, TranslateX, WindowSlicing, InputDropout, Resize, RandomSize, SelfDropout, RandomTimeScale, DownUpScale, RandomLowRes, RandomTimeStep, ResampleSteps)
 - **All major transforms implemented**
-- **Priority Gaps:** TSShuffle_HLs (OHLC-specific, niche use case)
+- **Priority Gaps:** None
 
 ---
 

@@ -14,7 +14,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 | Category | tsai (Python) | tsai-rs (Rust) | Coverage |
 |----------|---------------|----------------|----------|
-| **Models** | 40+ architectures | 31 architectures | **78%** |
+| **Models** | 40+ architectures | 34 architectures | **85%** |
 | **Augmentation Transforms** | 40+ transforms | 29 transforms | **73%** |
 | **Label Mixing** | 4 transforms | 3 transforms | **75%** |
 | **Imaging Transforms** | 7 transforms | 4 transforms | **57%** |
@@ -26,7 +26,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | **Analysis Tools** | 5+ tools | 4 tools | **80%** |
 | **Explainability** | Full suite | Partial | **60%** |
 
-**Overall Feature Parity: ~85%**
+**Overall Feature Parity: ~90%**
 
 ---
 
@@ -58,7 +58,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | TSSequencerPlus | ✅ | ❌ | **GAP** | Sequencer adaptation |
 | TabTransformer | ✅ | ✅ | **FIT** | Tabular + TS Transformer |
 | GatedTabTransformer | ✅ | ❌ | **GAP** | Gated variant |
-| TabFusionTransformer | ✅ | ❌ | **GAP** | Fusion variant |
+| TabFusionTransformer | ✅ | ✅ | **FIT** | Fusion of TS + tabular data |
 
 ### 1.3 RNN Models
 
@@ -79,7 +79,7 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | LSTM-FCN | ✅ | ✅ | **FIT** | Via RNNFCN with RNNFCNType::LSTM |
 | GRU-FCN | ✅ | ✅ | **FIT** | Via RNNFCN with RNNFCNType::GRU |
 | MLSTM-FCN | ✅ | ✅ | **FIT** | Multi-LSTM + FCN with SE attention |
-| TransformerRNNPlus | ✅ | ❌ | **GAP** | Transformer + RNN |
+| TransformerRNNPlus | ✅ | ✅ | **FIT** | Transformer + RNN hybrid |
 | ConvTranPlus | ✅ | ✅ | **FIT** | Conv + Transformer hybrid |
 
 ### 1.5 ROCKET Family
@@ -97,16 +97,16 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Model | tsai (Python) | tsai-rs (Rust) | Status | Notes |
 |-------|---------------|----------------|--------|-------|
 | MLP | ✅ | ❌ | **GAP** | Multilayer Perceptron |
-| gMLP | ✅ | ❌ | **GAP** | Gated MLP |
+| gMLP | ✅ | ✅ | **FIT** | Gated MLP with spatial gating |
 | TabModel | ✅ | ❌ | **GAP** | Tabular model |
 | MultiInputNet | ✅ | ❌ | **GAP** | Multi-modal |
 | XResNet1d | ✅ | ❌ | **GAP** | XResNet for 1D |
 
 ### Model Gap Summary
 
-- **Implemented:** 31 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TabTransformer, LSTM, GRU)
-- **Missing:** 9+ models
-- **Priority Gaps:** TransformerRNNPlus, gMLP, TabFusionTransformer
+- **Implemented:** 34 models (InceptionTimePlus, ResNetPlus, XCMPlus, FCN, XceptionTimePlus, OmniScaleCNN, TCN, MWDN, TSTPlus, TSiTPlus, TSPerceiver, PatchTST, GMLP, ROCKET, MiniRocket, MultiRocketPlus, HydraPlus, HydraMultiRocketPlus, RNNPlus, RNNAttention, LSTMAttention, GRUAttention, RNNFCN, LSTMFCN, GRUFCN, MLSTMFCN, ConvTranPlus, TransformerRNNPlus, TabTransformer, TabFusionTransformer, LSTM, GRU)
+- **Missing:** 6+ models
+- **Priority Gaps:** MLP, GatedTabTransformer, TSSequencerPlus
 
 ---
 
@@ -411,9 +411,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 ### High Priority (Core Functionality)
 
 1. **Models to Add:**
-   - TransformerRNNPlus
-   - gMLP
-   - TabFusionTransformer
+   - MLP (Multilayer Perceptron)
+   - GatedTabTransformer
+   - TSSequencerPlus
 
 2. **Transforms to Add:**
    - Advanced wavelet-based transforms
@@ -495,9 +495,9 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 ## 12. Conclusion
 
-tsai-rs provides a solid foundation with approximately **85% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
+tsai-rs provides a solid foundation with approximately **90% feature parity** with the Python tsai library. The core infrastructure (datasets, dataloaders, models, training loop, callbacks, schedulers) is well-implemented. The main gaps are:
 
-1. **Model diversity** - 31 of 40+ models implemented (~78%)
+1. **Model diversity** - 34 of 40+ models implemented (~85%)
 2. **Augmentation transforms** - 29 of 40+ transforms implemented (~73%)
 3. **Callbacks** - 10 of 10+ callbacks implemented (~100%)
 
@@ -510,8 +510,8 @@ The Rust implementation benefits from:
 - 158 UCR datasets with auto-download
 
 **Recommended next steps:**
-1. Add TransformerRNNPlus model
-2. Add gMLP model
+1. Add MLP model
+2. Add GatedTabTransformer model
 3. Add UEA dataset auto-download
 4. Add ONNX export support
 5. Complete integrated gradients explainability

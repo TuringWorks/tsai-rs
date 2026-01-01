@@ -34,6 +34,7 @@ pub mod compat;
 pub mod error;
 pub mod evaluation;
 pub mod export;
+pub mod hpo;
 pub mod learner;
 pub mod losses;
 pub mod metrics;
@@ -69,6 +70,10 @@ pub use training::{
 pub use evaluation::{evaluate_classification, ConfusionMatrix, EvaluationResult};
 pub use export::{
     quick_load, quick_save, save_model_bundle, ExportMetadata, LearnerExport,
+};
+pub use hpo::{
+    GridSearch, HpoError, HyperparameterSpace, ParamSet, ParamValue, RandomSearch, SearchResult,
+    SuccessiveHalving, TrialResult,
 };
 
 #[cfg(feature = "wandb")]

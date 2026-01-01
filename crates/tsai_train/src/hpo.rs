@@ -162,11 +162,23 @@ pub enum ParamDef {
     /// Float parameter with list of values to try.
     Float(Vec<f64>),
     /// Float parameter with range (min, max) for random sampling.
-    FloatRange { min: f64, max: f64, log_scale: bool },
+    FloatRange {
+        /// Minimum value.
+        min: f64,
+        /// Maximum value.
+        max: f64,
+        /// Whether to use log-scale sampling.
+        log_scale: bool,
+    },
     /// Integer parameter with list of values to try.
     Int(Vec<i64>),
     /// Integer parameter with range (min, max) for random sampling.
-    IntRange { min: i64, max: i64 },
+    IntRange {
+        /// Minimum value.
+        min: i64,
+        /// Maximum value.
+        max: i64,
+    },
     /// Boolean parameter (tries both true and false).
     Bool,
     /// Categorical parameter with list of options.

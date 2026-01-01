@@ -360,8 +360,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | with_decoded option | ✅ | ✅ | **FIT** | Predictions.decoded |
 | with_loss option | ✅ | ✅ | **FIT** | Predictions.losses |
 | Batch inference | ✅ | ✅ | **FIT** | DataLoader support |
-| load_learner | ✅ | ❌ | **GAP** | Model loading |
-| Model export | ✅ | ❌ | **GAP** | Safetensors planned |
+| load_learner | ✅ | ✅ | **FIT** | LearnerExport, quick_load, quick_save |
+| Model export | ✅ | ✅ | **FIT** | MessagePack format, metadata, training state |
 
 ---
 

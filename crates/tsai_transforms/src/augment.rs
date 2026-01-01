@@ -6844,6 +6844,312 @@ impl<B: Backend> Transform<B> for RandomLowRes {
     }
 }
 
+/// Configuration for TSRandomTimeStep transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomTimeStepConfig {
+    /// Minimum step size for sampling.
+    pub min_step: usize,
+    /// Maximum step size for sampling.
+    pub max_step: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for RandomTimeStepConfig {
+    fn default() -> Self {
+        Self {
+            min_step: 1,
+            max_step: 3,
+            p: 0.5,
+        }
+    }
+}
+
+/// Random time step transform for time series.
+///
+/// Randomly samples the time series at different step sizes,
+/// then interpolates back to the original length.
+pub struct RandomTimeStep {
+    config: RandomTimeStepConfig,
+    seed: Seed,
+}
+
+impl RandomTimeStep {
+    /// Create a new random time step transform.
+    #[must_use]
+    pub fn new(min_step: usize, max_step: usize) -> Self {
+        Self {
+            config: RandomTimeStepConfig {
+                min_step,
+                max_step,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: RandomTimeStepConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate(values: &[f32], src_len: usize, target_len: usize) -> Vec<f32> {
+        if src_len == target_len || target_len < 2 || src_len < 2 {
+            return values[..target_len.min(values.len())].to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (src_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(src_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(src_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for RandomTimeStep {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        // Random step size
+        let step = rng.gen_range(self.config.min_step..=self.config.max_step).max(1);
+        let sampled_len = (orig_len + step - 1) / step;
+
+        if sampled_len < 2 {
+            return Ok(batch);
+        }
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * orig_len + v * orig_len;
+
+                // Sample at step intervals
+                let mut sampled: Vec<f32> = Vec::with_capacity(sampled_len);
+                for i in (0..orig_len).step_by(step) {
+                    sampled.push(x_values[start + i]);
+                }
+
+                // Interpolate back to original length
+                let final_series = Self::interpolate(&sampled, sampled.len(), orig_len);
+
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "RandomTimeStep"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
+/// Configuration for TSResampleSteps transform.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResampleStepsConfig {
+    /// Target number of steps to resample to.
+    pub n_steps: usize,
+    /// Probability of applying the transform.
+    pub p: f32,
+}
+
+impl Default for ResampleStepsConfig {
+    fn default() -> Self {
+        Self {
+            n_steps: 50,
+            p: 0.5,
+        }
+    }
+}
+
+/// Resample steps transform for time series.
+///
+/// Resamples the time series to a specific number of steps,
+/// then interpolates back to the original length.
+pub struct ResampleSteps {
+    config: ResampleStepsConfig,
+    seed: Seed,
+}
+
+impl ResampleSteps {
+    /// Create a new resample steps transform.
+    #[must_use]
+    pub fn new(n_steps: usize) -> Self {
+        Self {
+            config: ResampleStepsConfig {
+                n_steps,
+                ..Default::default()
+            },
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: ResampleStepsConfig) -> Self {
+        Self {
+            config,
+            seed: Seed::from_entropy(),
+        }
+    }
+
+    /// Set probability.
+    #[must_use]
+    pub fn with_probability(mut self, p: f32) -> Self {
+        self.config.p = p;
+        self
+    }
+
+    /// Set the random seed.
+    #[must_use]
+    pub fn with_seed(mut self, seed: Seed) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Linear interpolation helper.
+    fn interpolate(values: &[f32], src_len: usize, target_len: usize) -> Vec<f32> {
+        if src_len == target_len || target_len < 2 || src_len < 2 {
+            return values[..target_len.min(values.len())].to_vec();
+        }
+
+        let mut result = vec![0.0f32; target_len];
+        for t in 0..target_len {
+            let src_pos = t as f32 * (src_len - 1) as f32 / (target_len - 1).max(1) as f32;
+            let src_idx_low = (src_pos.floor() as usize).min(src_len - 1);
+            let src_idx_high = (src_idx_low + 1).min(src_len - 1);
+            let frac = src_pos - src_idx_low as f32;
+
+            result[t] = values[src_idx_low] * (1.0 - frac) + values[src_idx_high] * frac;
+        }
+        result
+    }
+}
+
+impl<B: Backend> Transform<B> for ResampleSteps {
+    fn apply(&self, batch: TSBatch<B>, split: Split) -> Result<TSBatch<B>> {
+        if split.is_eval() {
+            return Ok(batch);
+        }
+
+        let mut rng = self.seed.to_rng();
+
+        if rng.gen::<f32>() > self.config.p {
+            return Ok(batch);
+        }
+
+        let shape = batch.x.shape();
+        let batch_size = shape.batch();
+        let n_vars = shape.vars();
+        let orig_len = shape.len();
+        let device = batch.device();
+
+        let n_steps = self.config.n_steps.max(2);
+
+        if n_steps >= orig_len {
+            return Ok(batch);
+        }
+
+        let x = batch.x.into_inner();
+        let x_data = x.to_data();
+        let x_values: Vec<f32> = x_data
+            .to_vec()
+            .map_err(|_| CoreError::TransformError("Failed to convert tensor data".to_string()))?;
+
+        let mut result_values = vec![0.0f32; batch_size * n_vars * orig_len];
+
+        for b in 0..batch_size {
+            for v in 0..n_vars {
+                let start = b * n_vars * orig_len + v * orig_len;
+                let series: Vec<f32> = x_values[start..start + orig_len].to_vec();
+
+                // Downsample to n_steps, then back up
+                let down = Self::interpolate(&series, orig_len, n_steps);
+                let final_series = Self::interpolate(&down, n_steps, orig_len);
+
+                let out_start = b * n_vars * orig_len + v * orig_len;
+                result_values[out_start..out_start + orig_len].copy_from_slice(&final_series);
+            }
+        }
+
+        let result: Tensor<B, 3> =
+            Tensor::<B, 1>::from_floats(result_values.as_slice(), &device)
+                .reshape([batch_size, n_vars, orig_len]);
+
+        Ok(TSBatch {
+            x: TSTensor::new(result)?,
+            y: batch.y,
+            mask: batch.mask,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "ResampleSteps"
+    }
+
+    fn should_apply(&self, split: Split) -> bool {
+        split.is_train()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

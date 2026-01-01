@@ -336,8 +336,8 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 | Random split | ✅ | ✅ | **FIT** | train_test_split |
 | Stratified split | ✅ | ✅ | **FIT** | StratifiedSampler |
 | Walk-forward CV | ✅ | ❌ | **GAP** | Time series CV |
-| SlidingWindow | ✅ | ❌ | **GAP** | Window creation |
-| TimeSplitter | ✅ | ❌ | **GAP** | Time-based split |
+| SlidingWindow | ✅ | ✅ | **FIT** | Window creation with configurable stride/horizon |
+| TimeSplitter | ✅ | ✅ | **FIT** | Time-based split preserving temporal order |
 
 ### 6.3 External Datasets
 
@@ -418,15 +418,11 @@ This document provides a comprehensive fit-gap analysis between the Python `tsai
 
 2. **Data:**
    - UEA dataset auto-download
-   - SlidingWindow
-   - TimeSplitter
+   - Walk-forward cross-validation
 
 ### Low Priority (Advanced Features)
 
-3. **Data:**
-   - Walk-forward cross-validation
-
-4. **Integration:**
+3. **Integration:**
    - tsfresh feature extraction
    - ONNX export
    - Optuna integration

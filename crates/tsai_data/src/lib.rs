@@ -42,7 +42,10 @@ pub use error::{DataError, Result};
 pub use io::{read_csv, read_npy, read_npz, read_parquet};
 pub use loader::{TSDataLoader, TSDataLoaderBuilder, TSDataLoaders, TSDataLoadersBuilder};
 pub use sampler::{RandomSampler, SequentialSampler, StratifiedSampler};
-pub use splits::{train_test_split, train_valid_test_split, SplitStrategy};
+pub use splits::{
+    sliding_window, sliding_window_batch, time_split, time_split_indices, train_test_split,
+    train_valid_test_split, SlidingWindowConfig, SplitStrategy, TimeSplitterConfig,
+};
 pub use ucr::{list_datasets as list_ucr_datasets, UCRDataset, UCRDatasetInfo};
 
 /// Cache directory for downloaded datasets.

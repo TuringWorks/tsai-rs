@@ -70,6 +70,340 @@ pub fn train_test_split(
     Ok((train, test))
 }
 
+/// Configuration for SlidingWindow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlidingWindowConfig {
+    /// Window size (number of time steps per window).
+    pub window_size: usize,
+    /// Stride between consecutive windows.
+    pub stride: usize,
+    /// Horizon size for forecasting (output steps).
+    pub horizon: usize,
+    /// Whether to get only complete windows.
+    pub drop_incomplete: bool,
+}
+
+impl Default for SlidingWindowConfig {
+    fn default() -> Self {
+        Self {
+            window_size: 50,
+            stride: 1,
+            horizon: 1,
+            drop_incomplete: true,
+        }
+    }
+}
+
+impl SlidingWindowConfig {
+    /// Create a new SlidingWindow configuration.
+    pub fn new(window_size: usize) -> Self {
+        Self {
+            window_size,
+            ..Default::default()
+        }
+    }
+
+    /// Set the stride.
+    #[must_use]
+    pub fn with_stride(mut self, stride: usize) -> Self {
+        self.stride = stride;
+        self
+    }
+
+    /// Set the forecast horizon.
+    #[must_use]
+    pub fn with_horizon(mut self, horizon: usize) -> Self {
+        self.horizon = horizon;
+        self
+    }
+
+    /// Set whether to drop incomplete windows.
+    #[must_use]
+    pub fn with_drop_incomplete(mut self, drop: bool) -> Self {
+        self.drop_incomplete = drop;
+        self
+    }
+}
+
+/// Create sliding windows from a time series.
+///
+/// This is useful for:
+/// - Creating training samples for forecasting
+/// - Generating windows for classification
+/// - Preparing data for RNNs/Transformers
+///
+/// # Arguments
+///
+/// * `data` - Input time series of shape (n_vars, seq_len)
+/// * `config` - Sliding window configuration
+///
+/// # Returns
+///
+/// Tuple of (windows, targets) where:
+/// - windows: Vec of (n_vars, window_size) arrays
+/// - targets: Vec of (n_vars, horizon) arrays (for forecasting)
+pub fn sliding_window(
+    data: &ndarray::Array2<f32>,
+    config: &SlidingWindowConfig,
+) -> Result<(Vec<ndarray::Array2<f32>>, Vec<ndarray::Array2<f32>>)> {
+    use ndarray::s;
+
+    let (n_vars, seq_len) = (data.nrows(), data.ncols());
+
+    if config.window_size == 0 {
+        return Err(DataError::SplitError(
+            "window_size must be > 0".to_string(),
+        ));
+    }
+
+    let total_len = config.window_size + config.horizon;
+    if seq_len < total_len {
+        return Err(DataError::SplitError(format!(
+            "Sequence length {} is shorter than window_size + horizon = {}",
+            seq_len, total_len
+        )));
+    }
+
+    let mut windows = Vec::new();
+    let mut targets = Vec::new();
+
+    let mut start = 0;
+    while start + total_len <= seq_len {
+        // Extract window
+        let window = data.slice(s![.., start..start + config.window_size]);
+        windows.push(window.to_owned());
+
+        // Extract target (horizon)
+        if config.horizon > 0 {
+            let target_start = start + config.window_size;
+            let target = data.slice(s![.., target_start..target_start + config.horizon]);
+            targets.push(target.to_owned());
+        }
+
+        start += config.stride;
+    }
+
+    // Handle incomplete last window if not dropping
+    if !config.drop_incomplete && start + config.window_size <= seq_len {
+        let window = data.slice(s![.., start..start + config.window_size]);
+        windows.push(window.to_owned());
+
+        // Target might be incomplete or missing
+        let remaining = seq_len - (start + config.window_size);
+        if remaining > 0 {
+            let target_start = start + config.window_size;
+            let target_end = (target_start + config.horizon).min(seq_len);
+            let mut target = ndarray::Array2::zeros((n_vars, config.horizon));
+            for i in 0..n_vars {
+                for j in 0..(target_end - target_start) {
+                    target[[i, j]] = data[[i, target_start + j]];
+                }
+            }
+            targets.push(target);
+        }
+    }
+
+    Ok((windows, targets))
+}
+
+/// Create sliding windows for a 3D dataset (batch, vars, seq_len).
+///
+/// Applies sliding window to each sample in the batch.
+pub fn sliding_window_batch(
+    data: &ndarray::Array3<f32>,
+    config: &SlidingWindowConfig,
+) -> Result<(ndarray::Array3<f32>, ndarray::Array3<f32>)> {
+    let (batch_size, n_vars, _seq_len) = data.dim();
+
+    let mut all_windows = Vec::new();
+    let mut all_targets = Vec::new();
+
+    for i in 0..batch_size {
+        let sample = data.slice(ndarray::s![i, .., ..]).to_owned();
+        let (windows, targets) = sliding_window(&sample, config)?;
+        all_windows.extend(windows);
+        all_targets.extend(targets);
+    }
+
+    if all_windows.is_empty() {
+        return Err(DataError::SplitError(
+            "No windows created from batch".to_string(),
+        ));
+    }
+
+    let n_windows = all_windows.len();
+
+    // Stack into 3D arrays
+    let windows_3d = ndarray::Array3::from_shape_fn(
+        (n_windows, n_vars, config.window_size),
+        |(i, j, k)| all_windows[i][[j, k]],
+    );
+
+    let targets_3d = if config.horizon > 0 {
+        ndarray::Array3::from_shape_fn((n_windows, n_vars, config.horizon), |(i, j, k)| {
+            all_targets[i][[j, k]]
+        })
+    } else {
+        ndarray::Array3::zeros((n_windows, n_vars, 0))
+    };
+
+    Ok((windows_3d, targets_3d))
+}
+
+/// Configuration for TimeSplitter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSplitterConfig {
+    /// Train ratio (fraction of time for training).
+    pub train_ratio: f32,
+    /// Validation ratio (fraction of time for validation).
+    pub valid_ratio: f32,
+    /// Gap between train/valid and test (for forecasting).
+    pub gap: usize,
+}
+
+impl Default for TimeSplitterConfig {
+    fn default() -> Self {
+        Self {
+            train_ratio: 0.7,
+            valid_ratio: 0.1,
+            gap: 0,
+        }
+    }
+}
+
+impl TimeSplitterConfig {
+    /// Create a new TimeSplitter configuration.
+    pub fn new(train_ratio: f32, valid_ratio: f32) -> Self {
+        Self {
+            train_ratio,
+            valid_ratio,
+            gap: 0,
+        }
+    }
+
+    /// Set the gap between splits.
+    #[must_use]
+    pub fn with_gap(mut self, gap: usize) -> Self {
+        self.gap = gap;
+        self
+    }
+}
+
+/// Time-based splitter that preserves temporal order.
+///
+/// Unlike random splits, this ensures that:
+/// - Training data comes before validation data
+/// - Validation data comes before test data
+/// - No data leakage from future to past
+///
+/// This is essential for time series forecasting to avoid look-ahead bias.
+///
+/// # Arguments
+///
+/// * `dataset` - The dataset to split (assumed to be in temporal order)
+/// * `config` - TimeSplitter configuration
+///
+/// # Returns
+///
+/// Tuple of (train_dataset, valid_dataset, test_dataset).
+pub fn time_split(
+    dataset: &TSDataset,
+    config: &TimeSplitterConfig,
+) -> Result<(TSDataset, TSDataset, TSDataset)> {
+    let n = dataset.len();
+    let total_ratio = config.train_ratio + config.valid_ratio;
+
+    if total_ratio <= 0.0 || total_ratio >= 1.0 {
+        return Err(DataError::SplitError(format!(
+            "train_ratio + valid_ratio must be between 0 and 1, got {}",
+            total_ratio
+        )));
+    }
+
+    let n_train = (n as f32 * config.train_ratio).round() as usize;
+    let n_valid = (n as f32 * config.valid_ratio).round() as usize;
+
+    let n_train = n_train.max(1);
+    let n_valid = if config.valid_ratio > 0.0 {
+        n_valid.max(1)
+    } else {
+        0
+    };
+
+    // Ensure we have enough samples
+    let required = n_train + n_valid + config.gap + 1;
+    if required > n {
+        return Err(DataError::SplitError(format!(
+            "Not enough samples: {} available, but need at least {} (train={}, valid={}, gap={}, test>=1)",
+            n, required, n_train, n_valid, config.gap
+        )));
+    }
+
+    // Create indices preserving temporal order
+    let train_end = n_train;
+    let valid_start = train_end + config.gap;
+    let valid_end = valid_start + n_valid;
+    let test_start = valid_end + config.gap;
+
+    let train_indices: Vec<usize> = (0..train_end).collect();
+    let valid_indices: Vec<usize> = if n_valid > 0 {
+        (valid_start..valid_end).collect()
+    } else {
+        vec![]
+    };
+    let test_indices: Vec<usize> = (test_start..n).collect();
+
+    let train = dataset.subset(&train_indices)?;
+    let valid = if n_valid > 0 {
+        dataset.subset(&valid_indices)?
+    } else {
+        // Empty dataset
+        dataset.subset(&[])?
+    };
+    let test = dataset.subset(&test_indices)?;
+
+    Ok((train, valid, test))
+}
+
+/// Get indices for time-based split without creating datasets.
+///
+/// Useful when you want to split indices but manage datasets yourself.
+pub fn time_split_indices(n: usize, config: &TimeSplitterConfig) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let total_ratio = config.train_ratio + config.valid_ratio;
+
+    if total_ratio <= 0.0 || total_ratio >= 1.0 {
+        return Err(DataError::SplitError(format!(
+            "train_ratio + valid_ratio must be between 0 and 1, got {}",
+            total_ratio
+        )));
+    }
+
+    let n_train = (n as f32 * config.train_ratio).round() as usize;
+    let n_valid = (n as f32 * config.valid_ratio).round() as usize;
+
+    let n_train = n_train.max(1);
+    let n_valid = if config.valid_ratio > 0.0 {
+        n_valid.max(1)
+    } else {
+        0
+    };
+
+    let train_end = n_train;
+    let valid_start = train_end + config.gap;
+    let valid_end = valid_start + n_valid;
+    let test_start = valid_end + config.gap;
+
+    let train_indices: Vec<usize> = (0..train_end).collect();
+    let valid_indices: Vec<usize> = if n_valid > 0 {
+        (valid_start..valid_end.min(n)).collect()
+    } else {
+        vec![]
+    };
+    let test_indices: Vec<usize> = (test_start..n).collect();
+
+    Ok((train_indices, valid_indices, test_indices))
+}
+
 /// Split a dataset into train, validation, and test sets.
 ///
 /// # Arguments

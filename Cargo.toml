@@ -20,7 +20,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["tsai-rs contributors"]
 license = "Apache-2.0"
@@ -34,15 +34,15 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-tsai_core = { path = "crates/tsai_core", version = "0.1.1" }
-tsai_data = { path = "crates/tsai_data", version = "0.1.1" }
-tsai_transforms = { path = "crates/tsai_transforms", version = "0.1.1" }
-tsai_models = { path = "crates/tsai_models", version = "0.1.1" }
-tsai_train = { path = "crates/tsai_train", version = "0.1.1" }
-tsai_analysis = { path = "crates/tsai_analysis", version = "0.1.1" }
-tsai_explain = { path = "crates/tsai_explain", version = "0.1.1" }
-tsai = { path = "crates/tsai", version = "0.1.1" }
-tsai_compute = { path = "crates/tsai_compute", version = "0.1.1" }
+tsai_core = { path = "crates/tsai_core", version = "0.1.2" }
+tsai_data = { path = "crates/tsai_data", version = "0.1.2" }
+tsai_transforms = { path = "crates/tsai_transforms", version = "0.1.2" }
+tsai_models = { path = "crates/tsai_models", version = "0.1.2" }
+tsai_train = { path = "crates/tsai_train", version = "0.1.2" }
+tsai_analysis = { path = "crates/tsai_analysis", version = "0.1.2" }
+tsai_explain = { path = "crates/tsai_explain", version = "0.1.2" }
+tsai = { path = "crates/tsai", version = "0.1.2" }
+tsai_compute = { path = "crates/tsai_compute", version = "0.1.2" }
 
 # Burn framework (DL backend)
 burn = "0.16"

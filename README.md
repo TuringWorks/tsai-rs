@@ -8,13 +8,16 @@
 
 ## Features
 
-- **Comprehensive Model Zoo**: 16+ architectures including InceptionTimePlus, PatchTST, TSTPlus, MiniRocket, RNNPlus, FCN, and more
-- **Data Augmentation**: 17+ time series transforms (noise, warping, masking, SpecAugment, etc.)
-- **Training Framework**: 8 callbacks, 9 schedulers, 9 metrics, 5 loss functions, and checkpointing
-- **Analysis Tools**: Confusion matrix, top losses, permutation importance
-- **Explainability**: GradCAM, attention visualization, attribution maps
+- **Comprehensive Model Zoo**: 42 architectures including InceptionTimePlus, PatchTST, TSTPlus, MiniRocket, RNNPlus, TransformerModel, and more
+- **Data Augmentation**: 47 time series transforms, 4 label mixing, 7 imaging transforms
+- **Training Framework**: 14 callbacks, 9 schedulers, 10 metrics, 10 loss functions, and checkpointing
+- **Hyperparameter Optimization**: GridSearch, RandomSearch, SuccessiveHalving
+- **Dataset Archives**: 255 datasets with auto-download (UCR, UEA, TSER, Monash Forecasting)
+- **Feature Extraction**: 50+ tsfresh-style statistical features
+- **Analysis Tools**: Confusion matrix, top losses, permutation importance, calibration
+- **Explainability**: GradCAM, Integrated Gradients, attention visualization
 - **Multiple Backends**: CPU (ndarray), GPU (WGPU/Metal), Apple MLX, or PyTorch (tch)
-- **Python Bindings**: Use from Python via `tsai_rs` package
+- **Python Bindings**: Full API via `tsai_rs` package
 
 ## Quick Start
 
@@ -97,30 +100,41 @@ tsai = { version = "0.1", features = ["backend-wgpu"] }
 tsai = { version = "0.1", features = ["backend-mlx"] }
 ```
 
-## Model Zoo
+## Model Zoo (42 architectures)
 
 ### CNN Models
 - `InceptionTimePlus` - InceptionTime with improvements
-- `ResNetPlus` - ResNet adapted for time series
+- `ResNetPlus` / `ResCNN` - ResNet adapted for time series
 - `XceptionTimePlus` - Xception-inspired architecture
 - `OmniScaleCNN` - Multi-scale CNN
 - `XCMPlus` - Explainable CNN
 - `FCN` - Fully Convolutional Network
+- `TCN` - Temporal Convolutional Network
+- `MWDN` - Multi-scale Wavelet Decomposition Network
+- `MLP` - Multi-layer Perceptron baseline
+- `XResNet1d` - Extended ResNet for 1D
 
 ### Transformer Models
 - `TSTPlus` - Time Series Transformer
 - `TSiTPlus` - Improved TS Transformer with multiple PE options
 - `TSPerceiver` - Perceiver for time series
 - `PatchTST` - Patch-based Transformer
+- `TransformerModel` - Base Transformer with pre/post-norm options
+- `TSSequencer` - Sequence-to-sequence Transformer
+- `gMLP` - Gated MLP for time series
 
 ### ROCKET Family
-- `MiniRocket` - Fast random convolutional features
+- `MiniRocket` / `MultiRocket` - Fast random convolutional features
 
 ### RNN Models
 - `RNNPlus` - LSTM/GRU with improvements
+- `mWDN` - Multi-scale Wavelet RNN
 
-### Tabular Models
+### Tabular & Hybrid Models
 - `TabTransformer` - Transformer for tabular data
+- `TabModel` - MLP for tabular data
+- `TabFusion` - Fusion of tabular and time series
+- `MultiInputNet` - Multi-modal network (TS + tabular)
 
 ## Data Formats
 
@@ -166,17 +180,20 @@ Available transforms include:
 # Install CLI
 cargo install tsai_cli
 
-# List available datasets
+# List all 255 datasets across 4 archives
 tsai datasets list
 
 # Fetch a dataset
 tsai datasets fetch ucr:NATOPS
 
 # Train a model
-tsai train --arch InceptionTimePlus --dataset ./data --epochs 25
+tsai train --arch InceptionTimePlus --dataset ucr:ECG200 --epochs 25
+
+# Hyperparameter optimization
+tsai hpo --dataset ucr:ECG200 --strategy random --n-trials 20 --epochs 10
 
 # Evaluate
-tsai eval --checkpoint ./runs/best_model.safetensors
+tsai eval --checkpoint ./runs/best_model
 ```
 
 ## Examples
@@ -206,18 +223,38 @@ maturin develop --release
 import tsai_rs
 import numpy as np
 
-# Configure a model
-config = tsai_rs.InceptionTimePlusConfig(n_vars=1, seq_len=100, n_classes=5)
+# List available datasets (255 total)
+print(len(tsai_rs.get_UCR_univariate_list()))   # 158 UCR
+print(len(tsai_rs.get_UEA_list()))               # 30 UEA
+print(len(tsai_rs.get_TSER_list()))              # 19 TSER
+print(len(tsai_rs.get_forecasting_list()))       # 48 Forecasting
 
-# Compute confusion matrix
+# Load UCR dataset
+X_train, y_train, X_test, y_test = tsai_rs.get_UCR_data("ECG200")
+
+# Configure a model
+config = tsai_rs.InceptionTimePlusConfig(n_vars=1, seq_len=96, n_classes=2)
+
+# Feature extraction (50+ tsfresh-style features)
+series = np.random.randn(100).astype(np.float32)
+features = tsai_rs.extract_features(series, feature_set="efficient")
+print(f"Features: {list(features.keys())[:5]}...")
+
+# HPO search space
+space = tsai_rs.HyperparameterSpace()
+space.add_float("lr", [1e-4, 1e-3, 1e-2])
+space.add_int("batch_size", [16, 32, 64])
+
+# Analysis tools
 preds = np.array([0, 1, 2, 0, 1])
 targets = np.array([0, 1, 1, 0, 2])
 cm = tsai_rs.confusion_matrix(preds, targets, n_classes=3)
 print(f"Accuracy: {cm.accuracy():.2%}")
 
 # Time series to image transforms
-series = np.sin(np.linspace(0, 4*np.pi, 50)).astype(np.float32)
-gasf_image = tsai_rs.compute_gasf(series)
+gasf = tsai_rs.compute_gasf(series)
+gadf = tsai_rs.compute_gadf(series)
+rp = tsai_rs.compute_recurrence_plot(series)
 ```
 
 ## Benchmarks

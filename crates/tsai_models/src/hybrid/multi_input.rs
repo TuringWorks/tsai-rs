@@ -326,25 +326,34 @@ impl<B: Backend> MultiInputNet<B> {
         // Tabular input dimension
         let tab_in_dim =
             config.n_continuous + config.n_categorical * config.cat_embed_dim;
-        let tab_out_dim = config.tab_hidden_dim;
+        let has_tabular = tab_in_dim > 0;
+        let tab_out_dim = if has_tabular { config.tab_hidden_dim } else { 0 };
 
-        let tab_fc1 = LinearConfig::new(tab_in_dim, config.tab_hidden_dim).init(device);
-        let tab_fc2 = LinearConfig::new(config.tab_hidden_dim, tab_out_dim).init(device);
+        // Use dummy dimension 1 if no tabular data to avoid 0-size tensors
+        let tab_fc_in = if tab_in_dim > 0 { tab_in_dim } else { 1 };
+        let tab_fc_out = if has_tabular { tab_out_dim } else { 1 };
+        let tab_fc1 = LinearConfig::new(tab_fc_in, config.tab_hidden_dim).init(device);
+        let tab_fc2 = LinearConfig::new(config.tab_hidden_dim, tab_fc_out).init(device);
 
-        // Fusion layers
+        // Fusion layers - when no tabular data, only use ts_out_dim
         let (fusion_gate, ts_proj, tab_proj, final_in_dim) = match config.fusion {
             FusionType::Concat => (None, None, None, ts_out_dim + tab_out_dim),
             FusionType::Add => {
                 // Project both to same dimension
                 let proj_dim = config.final_hidden_dim;
                 let ts_proj = Some(LinearConfig::new(ts_out_dim, proj_dim).init(device));
-                let tab_proj = Some(LinearConfig::new(tab_out_dim, proj_dim).init(device));
+                let tab_proj = if has_tabular {
+                    Some(LinearConfig::new(tab_out_dim, proj_dim).init(device))
+                } else {
+                    Some(LinearConfig::new(1, proj_dim).init(device)) // Dummy
+                };
                 (None, ts_proj, tab_proj, proj_dim)
             }
             FusionType::Gated => {
                 let combined_dim = ts_out_dim + tab_out_dim;
-                let gate = Some(LinearConfig::new(combined_dim, combined_dim).init(device));
-                (gate, None, None, combined_dim)
+                let gate_dim = if combined_dim > 0 { combined_dim } else { 1 };
+                let gate = Some(LinearConfig::new(gate_dim, gate_dim).init(device));
+                (gate, None, None, combined_dim.max(ts_out_dim))
             }
         };
 

@@ -34,7 +34,7 @@ impl Default for ResCNNConfig {
             seq_len: 100,
             n_classes: 2,
             n_filters: vec![64, 64, 64],
-            kernel_sizes: vec![8, 5, 3],
+            kernel_sizes: vec![7, 5, 3], // Must be odd for Same padding
         }
     }
 }
@@ -215,7 +215,7 @@ mod tests {
     fn test_rescnn_config() {
         let config = ResCNNConfig::default();
         assert_eq!(config.n_filters.len(), 3);
-        assert_eq!(config.kernel_sizes, vec![8, 5, 3]);
+        assert_eq!(config.kernel_sizes, vec![7, 5, 3]); // Must be odd for Same padding
     }
 
     #[test]

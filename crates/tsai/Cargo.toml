@@ -119,3 +119,11 @@ required-features = ["backend-mlx"]
 name = "mlx_tensors"
 path = "../../examples/mlx_tensors.rs"
 required-features = ["backend-mlx"]
+
+[[example]]
+name = "feature_extraction"
+path = "../../examples/feature_extraction.rs"
+
+[[example]]
+name = "hpo"
+path = "../../examples/hpo.rs"

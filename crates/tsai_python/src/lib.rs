@@ -2,7 +2,7 @@
 //!
 //! This module provides PyO3 bindings to expose tsai-rs functionality to Python.
 
-use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray3, ToPyArray};
+use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, ToPyArray};
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyValueError, PyRuntimeError};
 use tsai_train::Scheduler;
@@ -922,6 +922,282 @@ fn mag_scale<'py>(
 }
 
 // ============================================================================
+// Feature extraction bindings
+// ============================================================================
+
+/// Extract features from a time series.
+#[pyfunction]
+#[pyo3(signature = (series, feature_set="efficient"))]
+fn extract_features<'py>(
+    py: Python<'py>,
+    series: PyReadonlyArray1<f32>,
+    feature_set: &str,
+) -> PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+    let series_vec: Vec<f32> = series.as_array().to_vec();
+
+    let fs = match feature_set.to_lowercase().as_str() {
+        "minimal" => tsai_analysis::FeatureSet::Minimal,
+        "efficient" => tsai_analysis::FeatureSet::Efficient,
+        "comprehensive" => tsai_analysis::FeatureSet::Comprehensive,
+        "all" => tsai_analysis::FeatureSet::All,
+        _ => return Err(PyValueError::new_err("feature_set must be 'minimal', 'efficient', 'comprehensive', or 'all'")),
+    };
+
+    let features = tsai_analysis::extract_features(&series_vec, fs);
+
+    let dict = pyo3::types::PyDict::new_bound(py);
+    for (name, value) in features.iter() {
+        dict.set_item(name, *value)?;
+    }
+
+    Ok(dict)
+}
+
+/// Extract features from multiple time series (batch).
+#[pyfunction]
+#[pyo3(signature = (series_batch, feature_set="efficient"))]
+fn extract_features_batch<'py>(
+    py: Python<'py>,
+    series_batch: PyReadonlyArray2<f32>,
+    feature_set: &str,
+) -> PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+    let batch = series_batch.as_array();
+    let n_samples = batch.shape()[0];
+
+    let fs = match feature_set.to_lowercase().as_str() {
+        "minimal" => tsai_analysis::FeatureSet::Minimal,
+        "efficient" => tsai_analysis::FeatureSet::Efficient,
+        "comprehensive" => tsai_analysis::FeatureSet::Comprehensive,
+        "all" => tsai_analysis::FeatureSet::All,
+        _ => return Err(PyValueError::new_err("feature_set must be 'minimal', 'efficient', 'comprehensive', or 'all'")),
+    };
+
+    // Get feature names from first sample
+    let first_series: Vec<f32> = batch.row(0).to_vec();
+    let first_features = tsai_analysis::extract_features(&first_series, fs.clone());
+    let feature_names: Vec<String> = first_features.keys().cloned().collect();
+
+    // Extract features for all samples
+    let mut all_features: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
+    for name in &feature_names {
+        all_features.insert(name.clone(), Vec::with_capacity(n_samples));
+    }
+
+    for i in 0..n_samples {
+        let series: Vec<f32> = batch.row(i).to_vec();
+        let features = tsai_analysis::extract_features(&series, fs.clone());
+        for (name, value) in features {
+            if let Some(vec) = all_features.get_mut(&name) {
+                vec.push(value);
+            }
+        }
+    }
+
+    let dict = pyo3::types::PyDict::new_bound(py);
+    for (name, values) in all_features {
+        let arr = ndarray::Array1::from_vec(values).to_pyarray_bound(py);
+        dict.set_item(name, arr)?;
+    }
+
+    Ok(dict)
+}
+
+// ============================================================================
+// Additional dataset bindings
+// ============================================================================
+
+/// Get list of available UEA multivariate datasets.
+#[pyfunction]
+fn get_UEA_list() -> Vec<String> {
+    tsai_data::uea::list_uea_datasets().iter().map(|s| s.to_string()).collect()
+}
+
+/// Get list of available TSER regression datasets.
+#[pyfunction]
+fn get_TSER_list() -> Vec<String> {
+    tsai_data::tser::list_tser_datasets().map(String::from).collect()
+}
+
+/// Get list of available Monash forecasting datasets.
+#[pyfunction]
+fn get_forecasting_list() -> Vec<String> {
+    tsai_data::forecasting::list_forecasting_datasets().map(String::from).collect()
+}
+
+// ============================================================================
+// HPO bindings
+// ============================================================================
+
+#[pyclass]
+pub struct PyHyperparameterSpace {
+    inner: tsai_train::HyperparameterSpace,
+}
+
+#[pymethods]
+impl PyHyperparameterSpace {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: tsai_train::HyperparameterSpace::new(),
+        }
+    }
+
+    fn add_float(&mut self, name: &str, values: Vec<f64>) -> PyResult<()> {
+        self.inner.add_float(name, &values);
+        Ok(())
+    }
+
+    fn add_float_range(&mut self, name: &str, min: f64, max: f64, log_scale: bool) -> PyResult<()> {
+        self.inner.add_float_range(name, min, max, log_scale);
+        Ok(())
+    }
+
+    fn add_int(&mut self, name: &str, values: Vec<i64>) -> PyResult<()> {
+        self.inner.add_int(name, &values);
+        Ok(())
+    }
+
+    fn add_int_range(&mut self, name: &str, min: i64, max: i64) -> PyResult<()> {
+        self.inner.add_int_range(name, min, max);
+        Ok(())
+    }
+
+    fn add_bool(&mut self, name: &str) -> PyResult<()> {
+        self.inner.add_bool(name);
+        Ok(())
+    }
+
+    fn add_categorical(&mut self, name: &str, options: Vec<String>) -> PyResult<()> {
+        let opts: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+        self.inner.add_categorical(name, &opts);
+        Ok(())
+    }
+
+    fn grid_size(&self) -> usize {
+        self.inner.grid_size()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("HyperparameterSpace(n_params={}, grid_size={})", self.inner.len(), self.inner.grid_size())
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyParamSet {
+    inner: tsai_train::ParamSet,
+}
+
+#[pymethods]
+impl PyParamSet {
+    fn get_float(&self, name: &str) -> PyResult<f64> {
+        self.inner.get_float(name)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn get_int(&self, name: &str) -> PyResult<i64> {
+        self.inner.get_int(name)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn get_bool(&self, name: &str) -> PyResult<bool> {
+        self.inner.get_bool(name)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn get_categorical(&self, name: &str) -> PyResult<String> {
+        self.inner.get_categorical(name)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+        let dict = pyo3::types::PyDict::new_bound(py);
+        for (name, value) in self.inner.iter() {
+            match value {
+                tsai_train::ParamValue::Float(v) => dict.set_item(name, *v)?,
+                tsai_train::ParamValue::Int(v) => dict.set_item(name, *v)?,
+                tsai_train::ParamValue::Bool(v) => dict.set_item(name, *v)?,
+                tsai_train::ParamValue::Categorical(v) => dict.set_item(name, v)?,
+            }
+        }
+        Ok(dict)
+    }
+
+    fn __repr__(&self) -> String {
+        let params: Vec<String> = self.inner.iter()
+            .map(|(k, v)| format!("{}={:?}", k, v))
+            .collect();
+        format!("ParamSet({})", params.join(", "))
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyTrialResult {
+    #[pyo3(get)]
+    trial: usize,
+    #[pyo3(get)]
+    score: f64,
+    params: tsai_train::ParamSet,
+}
+
+#[pymethods]
+impl PyTrialResult {
+    #[getter]
+    fn get_params(&self) -> PyParamSet {
+        PyParamSet { inner: self.params.clone() }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("TrialResult(trial={}, score={:.4})", self.trial, self.score)
+    }
+}
+
+#[pyclass]
+pub struct PySearchResult {
+    #[pyo3(get)]
+    best_score: f64,
+    #[pyo3(get)]
+    n_trials: usize,
+    best_params: tsai_train::ParamSet,
+    all_trials: Vec<tsai_train::TrialResult>,
+}
+
+#[pymethods]
+impl PySearchResult {
+    #[getter]
+    fn get_best_params(&self) -> PyParamSet {
+        PyParamSet { inner: self.best_params.clone() }
+    }
+
+    fn get_all_trials(&self) -> Vec<PyTrialResult> {
+        self.all_trials.iter().map(|t| PyTrialResult {
+            trial: t.trial,
+            score: t.score,
+            params: t.params.clone(),
+        }).collect()
+    }
+
+    fn top_n(&self, n: usize) -> Vec<PyTrialResult> {
+        let mut sorted = self.all_trials.clone();
+        sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.into_iter().take(n).map(|t| PyTrialResult {
+            trial: t.trial,
+            score: t.score,
+            params: t.params,
+        }).collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SearchResult(best_score={:.4}, n_trials={})", self.best_score, self.n_trials)
+    }
+}
+
+// ============================================================================
 // Utility functions
 // ============================================================================
 
@@ -950,13 +1226,18 @@ fn tsai_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(my_setup, m)?)?;
 
+    // Data loading
     m.add_function(wrap_pyfunction!(get_UCR_univariate_list, m)?)?;
     m.add_function(wrap_pyfunction!(get_UCR_multivariate_list, m)?)?;
     m.add_function(wrap_pyfunction!(get_UCR_data, m)?)?;
+    m.add_function(wrap_pyfunction!(get_UEA_list, m)?)?;
+    m.add_function(wrap_pyfunction!(get_TSER_list, m)?)?;
+    m.add_function(wrap_pyfunction!(get_forecasting_list, m)?)?;
     m.add_function(wrap_pyfunction!(combine_split_data, m)?)?;
     m.add_function(wrap_pyfunction!(train_test_split_indices, m)?)?;
     m.add_class::<TSDataset>()?;
 
+    // Model configs
     m.add_class::<InceptionTimePlusConfig>()?;
     m.add_class::<ResNetPlusConfig>()?;
     m.add_class::<PatchTSTConfig>()?;
@@ -964,21 +1245,33 @@ fn tsai_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RNNPlusConfig>()?;
     m.add_class::<MiniRocketConfig>()?;
 
+    // Training
     m.add_class::<LearnerConfig>()?;
     m.add_class::<OneCycleLR>()?;
 
+    // Analysis
     m.add_class::<ConfusionMatrix>()?;
     m.add_class::<TopLoss>()?;
     m.add_function(wrap_pyfunction!(confusion_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(top_losses, m)?)?;
 
+    // Feature extraction
+    m.add_function(wrap_pyfunction!(extract_features, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_features_batch, m)?)?;
+
+    // Transforms
     m.add_function(wrap_pyfunction!(compute_gasf, m)?)?;
     m.add_function(wrap_pyfunction!(compute_gadf, m)?)?;
     m.add_function(wrap_pyfunction!(compute_recurrence_plot, m)?)?;
     m.add_function(wrap_pyfunction!(ts_standardize, m)?)?;
-
     m.add_function(wrap_pyfunction!(add_gaussian_noise, m)?)?;
     m.add_function(wrap_pyfunction!(mag_scale, m)?)?;
+
+    // HPO
+    m.add_class::<PyHyperparameterSpace>()?;
+    m.add_class::<PyParamSet>()?;
+    m.add_class::<PyTrialResult>()?;
+    m.add_class::<PySearchResult>()?;
 
     Ok(())
 }

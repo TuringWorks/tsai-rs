@@ -1028,7 +1028,7 @@ fn get_forecasting_list() -> Vec<String> {
 // HPO bindings
 // ============================================================================
 
-#[pyclass]
+#[pyclass(name = "HyperparameterSpace")]
 pub struct PyHyperparameterSpace {
     inner: tsai_train::HyperparameterSpace,
 }
@@ -1086,7 +1086,7 @@ impl PyHyperparameterSpace {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "ParamSet")]
 #[derive(Clone)]
 pub struct PyParamSet {
     inner: tsai_train::ParamSet,
@@ -1135,7 +1135,7 @@ impl PyParamSet {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "TrialResult")]
 #[derive(Clone)]
 pub struct PyTrialResult {
     #[pyo3(get)]
@@ -1157,7 +1157,7 @@ impl PyTrialResult {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "SearchResult")]
 pub struct PySearchResult {
     #[pyo3(get)]
     best_score: f64,

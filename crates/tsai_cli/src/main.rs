@@ -10,7 +10,11 @@ use burn_autodiff::Autodiff;
 use burn_ndarray::NdArray;
 use tsai_core::Seed;
 use tsai_data::ucr::{self, UCRDataset};
+use tsai_data::uea;
+use tsai_data::tser;
+use tsai_data::forecasting;
 use tsai_data::TSDataLoaders;
+use tsai_train::{GridSearch, RandomSearch, HyperparameterSpace};
 use tsai_models::{
     InceptionTimePlus, InceptionTimePlusConfig,
     FCN, FCNConfig,
@@ -126,6 +130,32 @@ enum Commands {
         #[arg(long, default_value = "onnx")]
         format: String,
     },
+    /// Run hyperparameter optimization
+    Hpo {
+        /// UCR dataset name
+        #[arg(long, value_name = "NAME")]
+        dataset: String,
+
+        /// Search strategy: grid or random
+        #[arg(long, default_value = "random", value_name = "STRATEGY")]
+        strategy: String,
+
+        /// Number of trials (for random search)
+        #[arg(long, default_value = "10", value_name = "N")]
+        n_trials: usize,
+
+        /// Epochs per trial
+        #[arg(long, default_value = "10", value_name = "N")]
+        epochs: usize,
+
+        /// Random seed
+        #[arg(long, default_value = "42", value_name = "SEED")]
+        seed: u64,
+
+        /// Output directory for results
+        #[arg(long, default_value = "./hpo_results", value_name = "DIR")]
+        output: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -182,6 +212,14 @@ fn main() -> Result<()> {
             output,
             format,
         } => handle_export(checkpoint, output, format),
+        Commands::Hpo {
+            dataset,
+            strategy,
+            n_trials,
+            epochs,
+            seed,
+            output,
+        } => handle_hpo(dataset, strategy, n_trials, epochs, seed, output),
     }
 }
 
@@ -189,10 +227,10 @@ fn handle_datasets(command: DatasetCommands) -> Result<()> {
     match command {
         DatasetCommands::List => {
             println!("Available datasets:\n");
-            println!("UCR Time Series Archive ({} datasets):", ucr::UCR_DATASETS.len());
-            println!("─────────────────────────────────────────");
 
-            // Print in columns
+            // UCR datasets
+            println!("UCR Time Series Archive ({} univariate classification datasets):", ucr::UCR_DATASETS.len());
+            println!("─────────────────────────────────────────────────────────────────");
             let datasets = ucr::list_datasets();
             for chunk in datasets.chunks(4) {
                 let line: Vec<String> = chunk
@@ -201,6 +239,46 @@ fn handle_datasets(command: DatasetCommands) -> Result<()> {
                     .collect();
                 println!("  {}", line.join(""));
             }
+
+            // UEA datasets
+            println!("\nUEA Time Series Archive ({} multivariate classification datasets):", uea::UEA_DATASETS.len());
+            println!("─────────────────────────────────────────────────────────────────");
+            let uea_datasets = uea::list_uea_datasets();
+            for chunk in uea_datasets.chunks(4) {
+                let line: Vec<String> = chunk
+                    .iter()
+                    .map(|name| format!("{:<25}", name))
+                    .collect();
+                println!("  {}", line.join(""));
+            }
+
+            // TSER datasets
+            println!("\nTSER Archive ({} regression datasets):", tser::TSER_DATASETS.len());
+            println!("─────────────────────────────────────────────────────────────────");
+            let tser_datasets: Vec<_> = tser::list_tser_datasets().collect();
+            for chunk in tser_datasets.chunks(4) {
+                let line: Vec<String> = chunk
+                    .iter()
+                    .map(|name| format!("{:<25}", name))
+                    .collect();
+                println!("  {}", line.join(""));
+            }
+
+            // Forecasting datasets
+            println!("\nMonash Forecasting Archive ({} forecasting datasets):", forecasting::FORECASTING_DATASETS.len());
+            println!("─────────────────────────────────────────────────────────────────");
+            let forecast_datasets: Vec<_> = forecasting::list_forecasting_datasets().collect();
+            for chunk in forecast_datasets.chunks(3) {
+                let line: Vec<String> = chunk
+                    .iter()
+                    .map(|name| format!("{:<30}", name))
+                    .collect();
+                println!("  {}", line.join(""));
+            }
+
+            println!("\nTotal: {} datasets across 4 archives",
+                ucr::UCR_DATASETS.len() + uea::UEA_DATASETS.len() +
+                tser::TSER_DATASETS.len() + forecasting::FORECASTING_DATASETS.len());
 
             println!("\nUsage:");
             println!("  tsai datasets fetch ucr:DATASET_NAME");
@@ -978,5 +1056,177 @@ fn handle_export(checkpoint: String, output: String, format: String) -> Result<(
     }
 
     println!("\n=== Export complete! ===");
+    Ok(())
+}
+
+fn handle_hpo(
+    dataset: String,
+    strategy: String,
+    n_trials: usize,
+    epochs: usize,
+    seed: u64,
+    output: String,
+) -> Result<()> {
+    println!("=== tsai-rs Hyperparameter Optimization ===\n");
+    println!("Configuration:");
+    println!("  Dataset: {}", dataset);
+    println!("  Strategy: {}", strategy);
+    println!("  Trials: {}", n_trials);
+    println!("  Epochs per trial: {}", epochs);
+    println!("  Seed: {}", seed);
+    println!("  Output: {}", output);
+    println!();
+
+    // Parse dataset name
+    let (source, dataset_name) = parse_dataset_name(&dataset)?;
+
+    if source != "ucr" {
+        bail!("Only UCR datasets are currently supported for HPO");
+    }
+
+    // Load dataset
+    println!("Loading dataset: {}", dataset_name);
+    let ucr = UCRDataset::load(&dataset_name, None)
+        .context(format!("Failed to load dataset '{}'", dataset_name))?;
+
+    println!("  Train samples: {}", ucr.train.len());
+    println!("  Test samples: {}", ucr.test.len());
+    println!("  Sequence length: {}", ucr.seq_len);
+    println!("  Classes: {}", ucr.n_classes);
+    println!();
+
+    // Define hyperparameter search space
+    let mut space = HyperparameterSpace::new();
+    space
+        .add_float("learning_rate", &[1e-4, 5e-4, 1e-3, 5e-3, 1e-2])
+        .add_int("batch_size", &[16, 32, 64, 128])
+        .add_int("n_blocks", &[3, 4, 6])
+        .add_int("n_filters", &[16, 32, 64])
+        .add_float("dropout", &[0.0, 0.1, 0.2]);
+
+    println!("Search space:");
+    println!("  learning_rate: [1e-4, 5e-4, 1e-3, 5e-3, 1e-2]");
+    println!("  batch_size: [16, 32, 64, 128]");
+    println!("  n_blocks: [3, 4, 6]");
+    println!("  n_filters: [16, 32, 64]");
+    println!("  dropout: [0.0, 0.1, 0.2]");
+    println!();
+
+    // Clone data for objective function
+    let train_ds = ucr.train.clone();
+    let test_ds = ucr.test.clone();
+    let seq_len = ucr.seq_len;
+    let n_classes = ucr.n_classes;
+    let n_vars = ucr.train.n_vars();
+
+    // Define objective function
+    let objective = |params: &tsai_train::ParamSet| -> Result<f64, tsai_train::HpoError> {
+        let lr = params.get_float("learning_rate")?;
+        let batch_size = params.get_int("batch_size")? as usize;
+        let n_blocks = params.get_int("n_blocks")? as usize;
+        let n_filters = params.get_int("n_filters")? as usize;
+        let dropout = params.get_float("dropout")?;
+
+        // Create dataloaders
+        let dls = TSDataLoaders::builder(train_ds.clone(), test_ds.clone())
+            .batch_size(batch_size)
+            .shuffle_train(true)
+            .seed(Seed::new(seed))
+            .build()
+            .map_err(|e| tsai_train::HpoError::TrialError(e.to_string()))?;
+
+        // Configure model
+        let model_config = InceptionTimePlusConfig {
+            n_vars,
+            seq_len,
+            n_classes,
+            n_blocks,
+            n_filters,
+            kernel_sizes: [9, 19, 39],
+            bottleneck_dim: 32,
+            dropout,
+        };
+
+        // Initialize model
+        let autodiff_device = <TrainBackend as Backend>::Device::default();
+        let model: InceptionTimePlus<TrainBackend> = InceptionTimePlus::new(model_config, &autodiff_device);
+
+        // Configure trainer
+        let trainer_config = ClassificationTrainerConfig {
+            n_epochs: epochs,
+            lr,
+            weight_decay: 0.01,
+            grad_clip: 1.0,
+            verbose: false,
+            early_stopping_patience: 3,
+            early_stopping_min_delta: 0.001,
+        };
+
+        let trainer = ClassificationTrainer::<TrainBackend>::new(trainer_config, autodiff_device);
+
+        // Train
+        let result = trainer.fit_with_forward(
+            model,
+            &dls,
+            |model, x| model.forward(x),
+            |model, x| model.forward(x),
+        ).map_err(|e| tsai_train::HpoError::TrialError(e.to_string()))?;
+
+        Ok(result.best_valid_acc as f64)
+    };
+
+    println!("Starting {} search with {} trials...\n", strategy, n_trials);
+
+    let result = match strategy.to_lowercase().as_str() {
+        "grid" => {
+            let search = GridSearch::new(space).verbose(true);
+            search.run(objective)
+        }
+        "random" | _ => {
+            let search = RandomSearch::new(space, n_trials)
+                .seed(Seed::new(seed))
+                .verbose(true);
+            search.run(objective)
+        }
+    }.map_err(|e| anyhow::anyhow!("HPO failed: {}", e))?;
+
+    println!("\n=== HPO Results ===");
+    println!("Best validation accuracy: {:.2}%", result.best_score * 100.0);
+    println!("Best parameters:");
+    for (name, value) in result.best_params.iter() {
+        println!("  {}: {:?}", name, value);
+    }
+
+    // Save results
+    let output_path = PathBuf::from(&output);
+    std::fs::create_dir_all(&output_path)?;
+
+    let results_json = serde_json::json!({
+        "best_score": result.best_score,
+        "best_params": result.best_params,
+        "n_trials": result.n_trials,
+        "all_trials": result.all_trials.iter().map(|t| {
+            serde_json::json!({
+                "trial": t.trial,
+                "score": t.score,
+                "params": t.params,
+            })
+        }).collect::<Vec<_>>(),
+    });
+
+    let results_path = output_path.join("hpo_results.json");
+    std::fs::write(&results_path, serde_json::to_string_pretty(&results_json)?)?;
+    println!("\nResults saved to {:?}", results_path);
+
+    // Show top 3 configurations
+    println!("\nTop 3 configurations:");
+    for (i, trial) in result.top_n(3).iter().enumerate() {
+        println!("  {}. Score: {:.2}%", i + 1, trial.score * 100.0);
+        for (name, value) in trial.params.iter() {
+            println!("     {}: {:?}", name, value);
+        }
+    }
+
+    println!("\n=== HPO complete! ===");
     Ok(())
 }

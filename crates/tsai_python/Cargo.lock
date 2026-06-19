@@ -5225,7 +5225,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_analysis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "ndarray 0.16.1",
@@ -5241,7 +5241,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "burn-ndarray",
@@ -5256,7 +5256,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5279,7 +5279,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_explain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "ndarray 0.16.1",
@@ -5292,7 +5292,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_models"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "rand 0.8.5",
@@ -5327,7 +5327,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_train"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "burn-autodiff",
@@ -5348,7 +5348,7 @@ dependencies = [
 
 [[package]]
 name = "tsai_transforms"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "burn",
  "ndarray 0.16.1",
